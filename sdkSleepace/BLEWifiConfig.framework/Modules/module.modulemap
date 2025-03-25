@@ -1,0 +1,6 @@
+framework module BLEWifiConfig {
+  umbrella header "BLEWifiConfig.h"
+
+  export *
+  module * { export * }
+}

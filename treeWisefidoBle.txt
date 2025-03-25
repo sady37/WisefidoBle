@@ -1,0 +1,271 @@
+./
+├── EspBlufiSDK.md
+├── README.md
+├── WisefidoBle
+│   ├── AppDelegate.h
+│   ├── AppDelegate.m
+│   ├── Assets.xcassets
+│   │   ├── AccentColor.colorset
+│   │   │   └── Contents.json
+│   │   ├── AppIcon.appiconset
+│   │   │   ├── Contents.json
+│   │   │   ├── ic_launcher 1.png
+│   │   │   ├── ic_launcher 2.png
+│   │   │   └── ic_launcher.png
+│   │   └── Contents.json
+│   ├── Base.lproj
+│   │   ├── LaunchScreen.storyboard
+│   │   └── Main.storyboard
+│   ├── ConfigModels.h
+│   ├── ConfigModels.m
+│   ├── ConfigStorage.h
+│   ├── ConfigStorage.m
+│   ├── ConfigViewController.h
+│   ├── ConfigViewController.m
+│   ├── Info.plist
+│   ├── MainViewController.h
+│   ├── MainViewController.m
+│   ├── RadarBleManager.h
+│   ├── RadarBleManager.m
+│   ├── ScanViewController.h
+│   ├── ScanViewController.m
+│   ├── SceneDelegate.h
+│   ├── SceneDelegate.m
+│   ├── SleepaceBleManager.h
+│   ├── SleepaceBleManager.m
+│   ├── ViewController.h
+│   ├── ViewController.m
+│   └── main.m
+├── WisefidoBle.xcodeproj
+│   ├── project.pbxproj
+│   ├── project.xcworkspace
+│   │   ├── contents.xcworkspacedata
+│   │   ├── xcshareddata
+│   │   │   └── swiftpm
+│   │   │       └── configuration
+│   │   └── xcuserdata
+│   │       └── sady3721.xcuserdatad
+│   │           └── UserInterfaceState.xcuserstate
+│   └── xcuserdata
+│       └── sady3721.xcuserdatad
+│           └── xcschemes
+│               └── xcschememanagement.plist
+├── sdkEsp
+│   ├── BlufiClient.h
+│   ├── BlufiConfigureParams.h
+│   ├── BlufiConstants.h
+│   ├── BlufiScanResponse.h
+│   ├── BlufiStatusResponse.h
+│   ├── BlufiVersionResponse.h
+│   ├── Data
+│   │   ├── BlufiFrameCtrlData.h
+│   │   ├── BlufiFrameCtrlData.m
+│   │   ├── BlufiNotifyData.h
+│   │   └── BlufiNotifyData.m
+│   ├── ESPHeaderFiles.h
+│   ├── Response
+│   │   ├── BlufiClient.m
+│   │   ├── BlufiConfigureParams.m
+│   │   ├── BlufiConstants.m
+│   │   ├── BlufiScanResponse.m
+│   │   ├── BlufiStatusResponse.m
+│   │   └── BlufiVersionResponse.m
+│   └── Security
+│       ├── BlufiDH.h
+│       ├── BlufiDH.m
+│       ├── BlufiSecurity.h
+│       ├── BlufiSecurity.m
+│       └── openssl
+│           ├── include
+│           │   ├── LICENSE
+│           │   ├── openssl
+│           │   │   ├── aes.h
+│           │   │   ├── asn1.h
+│           │   │   ├── asn1_mac.h
+│           │   │   ├── asn1err.h
+│           │   │   ├── asn1t.h
+│           │   │   ├── async.h
+│           │   │   ├── asyncerr.h
+│           │   │   ├── bio.h
+│           │   │   ├── bioerr.h
+│           │   │   ├── blowfish.h
+│           │   │   ├── bn.h
+│           │   │   ├── bnerr.h
+│           │   │   ├── buffer.h
+│           │   │   ├── buffererr.h
+│           │   │   ├── camellia.h
+│           │   │   ├── cast.h
+│           │   │   ├── cmac.h
+│           │   │   ├── cms.h
+│           │   │   ├── cmserr.h
+│           │   │   ├── comp.h
+│           │   │   ├── comperr.h
+│           │   │   ├── conf.h
+│           │   │   ├── conf_api.h
+│           │   │   ├── conferr.h
+│           │   │   ├── crypto.h
+│           │   │   ├── cryptoerr.h
+│           │   │   ├── ct.h
+│           │   │   ├── cterr.h
+│           │   │   ├── des.h
+│           │   │   ├── dh.h
+│           │   │   ├── dherr.h
+│           │   │   ├── dsa.h
+│           │   │   ├── dsaerr.h
+│           │   │   ├── dtls1.h
+│           │   │   ├── e_os2.h
+│           │   │   ├── ebcdic.h
+│           │   │   ├── ec.h
+│           │   │   ├── ecdh.h
+│           │   │   ├── ecdsa.h
+│           │   │   ├── ecerr.h
+│           │   │   ├── engine.h
+│           │   │   ├── engineerr.h
+│           │   │   ├── err.h
+│           │   │   ├── evp.h
+│           │   │   ├── evperr.h
+│           │   │   ├── hmac.h
+│           │   │   ├── idea.h
+│           │   │   ├── kdf.h
+│           │   │   ├── kdferr.h
+│           │   │   ├── lhash.h
+│           │   │   ├── md2.h
+│           │   │   ├── md4.h
+│           │   │   ├── md5.h
+│           │   │   ├── mdc2.h
+│           │   │   ├── modes.h
+│           │   │   ├── obj_mac.h
+│           │   │   ├── objects.h
+│           │   │   ├── objectserr.h
+│           │   │   ├── ocsp.h
+│           │   │   ├── ocsperr.h
+│           │   │   ├── opensslconf.h
+│           │   │   ├── opensslconf_ios_arm64.h
+│           │   │   ├── opensslconf_ios_arm64e.h
+│           │   │   ├── opensslconf_ios_x86_64.h
+│           │   │   ├── opensslconf_tvos_arm64.h
+│           │   │   ├── opensslconf_tvos_x86_64.h
+│           │   │   ├── opensslv.h
+│           │   │   ├── ossl_typ.h
+│           │   │   ├── pem.h
+│           │   │   ├── pem2.h
+│           │   │   ├── pemerr.h
+│           │   │   ├── pkcs12.h
+│           │   │   ├── pkcs12err.h
+│           │   │   ├── pkcs7.h
+│           │   │   ├── pkcs7err.h
+│           │   │   ├── rand.h
+│           │   │   ├── rand_drbg.h
+│           │   │   ├── randerr.h
+│           │   │   ├── rc2.h
+│           │   │   ├── rc4.h
+│           │   │   ├── rc5.h
+│           │   │   ├── ripemd.h
+│           │   │   ├── rsa.h
+│           │   │   ├── rsaerr.h
+│           │   │   ├── safestack.h
+│           │   │   ├── seed.h
+│           │   │   ├── sha.h
+│           │   │   ├── srp.h
+│           │   │   ├── srtp.h
+│           │   │   ├── ssl.h
+│           │   │   ├── ssl2.h
+│           │   │   ├── ssl3.h
+│           │   │   ├── sslerr.h
+│           │   │   ├── stack.h
+│           │   │   ├── store.h
+│           │   │   ├── storeerr.h
+│           │   │   ├── symhacks.h
+│           │   │   ├── tls1.h
+│           │   │   ├── ts.h
+│           │   │   ├── tserr.h
+│           │   │   ├── txt_db.h
+│           │   │   ├── ui.h
+│           │   │   ├── uierr.h
+│           │   │   ├── whrlpool.h
+│           │   │   ├── x509.h
+│           │   │   ├── x509_vfy.h
+│           │   │   ├── x509err.h
+│           │   │   ├── x509v3.h
+│           │   │   └── x509v3err.h
+│           │   └── opensslconf-template.h
+│           ├── libcrypto.a
+│           └── libssl.a
+├── sdkSleepace
+│   ├── BLEWifiConfig.framework
+│   │   ├── BLEWifiConfig
+│   │   ├── Headers
+│   │   │   ├── BLEWifiConfig.h
+│   │   │   ├── SLPBleWifiConfig.h
+│   │   │   ├── SLPGetDeviceInfo.h
+│   │   │   ├── SLPGetWiFiInfo.h
+│   │   │   └── SLPWiFiConnectStatus.h
+│   │   ├── Info.plist
+│   │   ├── Modules
+│   │   │   └── module.modulemap
+│   │   └── _CodeSignature
+│   │       ├── CodeDirectory
+│   │       ├── CodeRequirements
+│   │       ├── CodeRequirements-1
+│   │       ├── CodeResources
+│   │       └── CodeSignature
+│   ├── BluetoothManager.framework
+│   │   ├── BluetoothManager
+│   │   ├── Headers
+│   │   │   ├── BluetoothManager.h
+│   │   │   ├── SLPBLEDef.h
+│   │   │   ├── SLPBLEManager+Scan.h
+│   │   │   ├── SLPBLEManager.h
+│   │   │   ├── SLPHistoryData.h
+│   │   │   └── SLPOriginalDataALG.h
+│   │   ├── Info.plist
+│   │   ├── Modules
+│   │   │   └── module.modulemap
+│   │   └── PrivateHeaders
+│   │       ├── SDCCPEnums.h
+│   │       ├── SLPBLEBaseEntity.h
+│   │       ├── SLPBLEBaseSendPacket.h
+│   │       ├── SLPBLECommon.h
+│   │       ├── SLPBLECommonHeads.h
+│   │       ├── SLPBLEManager+Connect.h
+│   │       ├── SLPBLESendPacketV_0.h
+│   │       ├── SLPBLESendPacketV_1.h
+│   │       ├── SLPBLESendPacketV_2.h
+│   │       ├── SLPBLESendPacketV_3.h
+│   │       └── SLPBleSendPacketHeads.h
+│   └── SLPCommon.framework
+│       ├── Headers
+│       │   ├── CRC.h
+│       │   ├── KFLoger.h
+│       │   ├── Loop.h
+│       │   ├── SLPAidInfo.h
+│       │   ├── SLPAlarmInfo.h
+│       │   ├── SLPClockDormancyBean.h
+│       │   ├── SLPCommon.h
+│       │   ├── SLPDataTransferCommon.h
+│       │   ├── SLPDataTransferDef.h
+│       │   ├── SLPDeviceInfo.h
+│       │   ├── SLPDeviceUpdateVersion.h
+│       │   ├── SLPHTTPManager.h
+│       │   ├── SLPLight.h
+│       │   ├── SLPSleepaceMusicInfo.h
+│       │   ├── SLPTimeInfo.h
+│       │   ├── SLPTimer.h
+│       │   └── SLPTools.h
+│       ├── Info.plist
+│       ├── Modules
+│       │   └── module.modulemap
+│       ├── PrivateHeaders
+│       │   ├── SLPBaseMusicModel.h
+│       │   └── SLPSceneObject.h
+│       ├── SLPCommon
+│       └── _CodeSignature
+│           ├── CodeDirectory
+│           ├── CodeRequirements
+│           ├── CodeRequirements-1
+│           ├── CodeResources
+│           └── CodeSignature
+├── sleepaceSDK.txt
+└── treeWisefidoBle.txt
+
+37 directories, 232 files

@@ -1,0 +1,167 @@
+	
+BLE WiFi Config IOS SDK Description
+V1.0
+
+Author Name: Cui Xiaodong 
+2020/11/30
+
+Change history
+Date	Change project	Change
+2020/11/30	Document creation	Cui Xiaodong
+		
+		
+		
+		
+		
+		
+		
+		
+Internal documents are strictly forbidden
+ 
+Directory
+Change history	1
+Directory	2
+APP End IOS SDK Brief Introduction	3
+1. function and purpose	3
+II. Development preparations	3
+1.framework	3
+2. development environment settings	3
+III. API NOTE	4
+1. Connector	4
+Interface description	4
+Parameter Description	4
+2. device configuration WiFi (including service address)	4
+Parameter Description	4
+3. configure the device WiFi (does not contain a service address)	5
+Parameter Description	5
+4. query whether WiFi device status is connected	6
+Interface description	6
+Parameter Description	6
+IV. Object description	6
+SLPTransforCallback	6
+Methodology brief	6
+Methodological description	6
+Parameter Description	7
+SLPDataTransferStatus	7
+Note	7
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+一、	APP End IOS SDK Brief Introduction
+1.	Function and Purpose
+BLE WiFi Config SDK is sleepace software development kit for rapid Internet of things APP development on the IOS platform. The SDK encapsulates the communication process between APP and hardware, and provides the functions of equipment configuration, equipment control and data query. Users of this SDK, need not care about complex communication protocols and underlying implementations, but only focus on APP interaction and business levels.
+二、	Development readiness
+1.	framework
+
+framework	Note
+SLPCommon.framework	Public segment
+BluetoothManager .framework	SDK core
+
+2.	Development environment settings
+1： add library libc++. tbd, add SLPCommon.framework ,BluetoothManager .framework to the project
+2：other linker flags add library links
+- force_load $(SRCROOT)/SA1001-Demo/libs/SLPCommon.framework/SLPCommon
+- force_load $(SRCROOT)/SA1001-Demo/libs/BluetoothManager.framework/
+BluetoothManager
+Note :$(SRCROOT) is followed by the relative address of the library
+三、	API note
+1.Connection equipment
+-(void) connectAndGetDeviceInfoWithPeripheral :(CBPeripheral*) peripheral
+               deviceType：(SLPDeviceTypes) deviceType 
+               completion：(void (^)(SLPDataTransferStatus status,id data)) compliance;
+Interface description
+Connect device and get device information
+Parameter Description
+Field	Type	Note
+peripheral	CBPeripheral	Peripheral devices
+deviceType	SLPDeviceTypes
+Type of equipment
+completion	SLPTransforCallback
+Callback interface
+
+2.Configure the device WiFi (including service address)
+-(void) configPeripheral :(CBPeripheral*) peripheral deviceType :(SLPDeviceTypes) deviceType
+           serverAddress：(NSString*) address port :(NSInteger) port 
+                wifiName：(NSString*) name 
+                password：(NSString*) password 
+              completion：(void (^)(SLPDataTransferStatus status,id data)) compliance;
+Parameter Description
+Field	Type	Note
+peripheral	CBPeripheral	Peripheral devices
+deviceType	SLPDeviceTypes
+Type of equipment
+address	NSString	Service address
+port	NSInteger	Service port
+name	NSString	wifi name
+password	NSString	wifi password
+completion	SLPTransforCallback
+Callback interface
+
+3.Configure the device WiFi (without service address)
+-(void) configPeripheral :(CBPeripheral*) peripheral deviceType :(SLPDeviceTypes) deviceType
+                wifiName：(NSString*) name 
+                password：(NSString*) password 
+              completion：(void (^)(SLPDataTransferStatus status,id data)) compliance;
+Parameter Description
+Field	Type	Note
+peripheral	CBPeripheral	Peripheral devices
+deviceType	SLPDeviceTypes
+Type of equipment
+name	NSString	wifi name
+password	NSString	wifi password
+completion	SLPTransforCallback
+Callback interface
+
+
+4.Check if the device WiFi status is connected
+-(void) check Device Connect WiFi Status :(CBPeripheral*) peripheral
+                          deviceType：(SLPDeviceTypes) deviceType 
+                          completion：(void (^)(BOOL succeed ,id data)) compliance;
+Interface description
+Effective for specific devices, supporting device <EW202W>
+Parameter Description
+Field	Type	Note
+peripheral	CBPeripheral	Peripheral devices
+deviceType	SLPDeviceTypes
+Type of equipment
+completion	SLPTransforCallback
+Callback interface
+
+
+四、	Object description
+SLPTransforCallback
+Methodology brief
+Callbacks when Bluetooth or TCP requests
+
+Methodological description	
+typedef void (^SLPTransforCallback)(SLPData Transfer Status, id data);
+
+Parameter Description	
+Field	Type	Note
+status	SLPDataTransferStatus	TCP or Bluetooth request return value, see enumeration SLPDataTransferStatus for details
+
+data	id	When the callback data is status valid for SLPDataTransferReturnStatus_Succeed, the user must have more different interfaces to convert to the corresponding object. For more details, see the interface instructions
+SLPDataTransferStatus
+Note
+Field	Value	Note
+SLPDataTransferStatus_Succeed	0	Success
+SLPDataTransferStatus_ConnectionDisconnected	1	Connection disconnected
+SLPDataTransferStatus_TimeOut	2	Timeout
+SLPDataTransferStatus_Failed	3	Failure
+SLPDataTransferStatus_ConnectionDisabled	4	Connection disabled or network disconnected
+SLPDataTransferStatus_ParameterError	5	Parameter Error
+
