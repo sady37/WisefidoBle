@@ -25,11 +25,11 @@
 		24958DB82D92343200FDF2A8 /* EspBlufiSDK.md in Resources */ = {isa = PBXBuildFile; fileRef = 24958DB72D92343200FDF2A8 /* EspBlufiSDK.md */; };
 		24958DBA2D92349600FDF2A8 /* treeWisefidoBle.txt in Resources */ = {isa = PBXBuildFile; fileRef = 24958DB92D92349600FDF2A8 /* treeWisefidoBle.txt */; };
 		24958DBB2D9235A700FDF2A8 /* BLEWifiConfig.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24958CFF2D9231B200FDF2A8 /* BLEWifiConfig.framework */; };
-		24958DBC2D9235A800FDF2A8 /* BLEWifiConfig.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 24958CFF2D9231B200FDF2A8 /* BLEWifiConfig.framework */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		24958DBC2D9235A800FDF2A8 /* BLEWifiConfig.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 24958CFF2D9231B200FDF2A8 /* BLEWifiConfig.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		24958DBE2D9235AA00FDF2A8 /* BluetoothManager.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24958D002D9231B200FDF2A8 /* BluetoothManager.framework */; };
-		24958DBF2D9235AA00FDF2A8 /* BluetoothManager.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 24958D002D9231B200FDF2A8 /* BluetoothManager.framework */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		24958DBF2D9235AA00FDF2A8 /* BluetoothManager.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 24958D002D9231B200FDF2A8 /* BluetoothManager.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		24958DC02D9235AC00FDF2A8 /* SLPCommon.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 24958D012D9231B200FDF2A8 /* SLPCommon.framework */; };
-		24958DC12D9235AC00FDF2A8 /* SLPCommon.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 24958D012D9231B200FDF2A8 /* SLPCommon.framework */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		24958DC12D9235AC00FDF2A8 /* SLPCommon.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 24958D012D9231B200FDF2A8 /* SLPCommon.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -197,6 +197,8 @@
 		24958CF72D922EBC00FDF2A8 /* Exceptions for "WisefidoBle" folder in "WisefidoBle" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				"/Localized: LaunchScreen.storyboard",
+				"/Localized: Main.storyboard",
 				Info.plist,
 			);
 			target = 24958CDF2D922EB900FDF2A8 /* WisefidoBle */;
@@ -549,8 +551,10 @@
 		24958CF92D922EBC00FDF2A8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SN46FP38T7;
@@ -560,13 +564,19 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"(PROJECT_DIR)/sdkEsp/Security/openssl/include",
-					"(PROJECT_DIR)/sdkEsp",
+					"$(PROJECT_DIR)/sdkEsp/Security/openssl/include",
+					"$(PROJECT_DIR)/sdkEsp",
 				);
 				INFOPLIST_FILE = WisefidoBle/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = WisefidoBle;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "We need access to Bluetooth to scan and communicate with nearby devices.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "We need access to Bluetooth to communicate with peripherals.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UILaunchStoryboardName = "";
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "armv7 bluetooth-le";
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
@@ -576,7 +586,7 @@
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/sdkEsp/Security/openssl",
+					"$(PROJECT_DIR)/sdkEsp/Security/openssl/**",
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wisefido.WisefidoBle;
@@ -589,8 +599,10 @@
 		24958CFA2D922EBC00FDF2A8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = SN46FP38T7;
@@ -600,13 +612,19 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
-					"(PROJECT_DIR)/sdkEsp/Security/openssl/include",
-					"(PROJECT_DIR)/sdkEsp",
+					"$(PROJECT_DIR)/sdkEsp/Security/openssl/include",
+					"$(PROJECT_DIR)/sdkEsp",
 				);
 				INFOPLIST_FILE = WisefidoBle/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = WisefidoBle;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "We need access to Bluetooth to scan and communicate with nearby devices.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "We need access to Bluetooth to communicate with peripherals.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UILaunchStoryboardName = "";
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "armv7 bluetooth-le";
+				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				IPHONEOS_DEPLOYMENT_TARGET = 15.6;
@@ -616,7 +634,7 @@
 				);
 				LIBRARY_SEARCH_PATHS = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/sdkEsp/Security/openssl",
+					"$(PROJECT_DIR)/sdkEsp/Security/openssl/**",
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wisefido.WisefidoBle;
