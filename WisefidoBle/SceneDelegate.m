@@ -24,31 +24,31 @@
     // Only set window and rootViewController in iOS 13 and above
     NSLog(@"[SceneDelegate] scene:willConnectToSession:options");
     if ([scene isKindOfClass:[UIWindowScene class]]) {
-        NSLog(@"[SceneDelegate] Scene is UIWindowScene type");
+        //NSLog(@"[SceneDelegate] Scene is UIWindowScene type");
         UIWindowScene *windowScene = (UIWindowScene *)scene;
-        NSLog(@"[SceneDelegate] Successfully converted to windowScene");
+        //NSLog(@"[SceneDelegate] Successfully converted to windowScene");
         
         self.window = [[UIWindow alloc] initWithWindowScene:windowScene];
-        NSLog(@"[SceneDelegate] Window created successfully: %@", self.window);
+        //NSLog(@"[SceneDelegate] Window created successfully: %@", self.window);
         
         self.window.backgroundColor = [UIColor systemBackgroundColor];
-        NSLog(@"[SceneDelegate] Window background color set");
+        //NSLog(@"[SceneDelegate] Window background color set");
         
         MainViewController *mainVC = [[MainViewController alloc] init];
         NSLog(@"[SceneDelegate] MainViewController created successfully: %@", mainVC);
         
         UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:mainVC];
-        NSLog(@"[SceneDelegate] NavigationController created successfully: %@", navController);
+        //NSLog(@"[SceneDelegate] NavigationController created successfully: %@", navController);
         
         self.window.rootViewController = navController;
-        NSLog(@"[SceneDelegate] rootViewController set successfully");
+        //NSLog(@"[SceneDelegate] rootViewController set successfully");
         
         [self.window makeKeyAndVisible];
         NSLog(@"[SceneDelegate] makeKeyAndVisible completed");
         
         // Set default text color for UILabel to system dynamic color
         [[UILabel appearance] setTextColor:[UIColor labelColor]];
-        NSLog(@"[SceneDelegate] Default UILabel color set");
+        //NSLog(@"[SceneDelegate] Default UILabel color set");
     } else {
         NSLog(@"[SceneDelegate] Error: Scene is not UIWindowScene type");
     }

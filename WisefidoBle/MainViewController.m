@@ -8,6 +8,7 @@
 #import "ConfigStorage.h"
 #import "ScanViewController.h"
 
+
 // 日志宏定义
 #define MAINLOG(fmt, ...) NSLog((@"[MainViewController] " fmt), ##__VA_ARGS__)
 
@@ -45,6 +46,8 @@
 // 属性
 @property (nonatomic, strong) DeviceInfo *selectedDevice;
 @property (nonatomic, strong) ConfigStorage *configStorage;
+@property (nonatomic, strong) CBCentralManager *tempManagerForPermission;
+
 
 // 方法声明
 - (void)handlePairButton:(id)sender;
@@ -85,10 +88,7 @@
     [self setupConstraints];
     [self setupActions];
     
-    // 加载蓝牙权限
-    [self checkBluetoothPermissions];
-
-    
+       
     // 加载最近配置
     [self loadRecentConfigs];
     
@@ -424,45 +424,6 @@
     [self.recentWifiButton addTarget:self action:@selector(showWifiHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
 }
 
-
-
-#pragma mark - 权限检查
-
-- (void)checkBluetoothPermissions {
-    // iOS 13+ 需要显式请求蓝牙权限
-    if (@available(iOS 13.1, *)) {
-        CBCentralManager *tempManager = [[CBCentralManager alloc] initWithDelegate:nil queue:nil];
-        CBManagerState state = tempManager.state;
-        
-        if (state == CBManagerStateUnauthorized) {
-            [self showPermissionAlert];
-        }
-    }
-}
-
-- (void)showPermissionAlert {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Bluetooth Permission Required"
-                                                                   message:@"This app needs Bluetooth permission to scan for devices. Please enable Bluetooth access in Settings."
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    UIAlertAction *openSettings = [UIAlertAction actionWithTitle:@"Open Settings"
-                                                           style:UIAlertActionStyleDefault
-                                                         handler:^(UIAlertAction * _Nonnull action) {
-	[[UIApplication sharedApplication] openURL:[NSURL URLWithString:UIApplicationOpenSettingsURLString]
-	                                   options:@{}
-	                         completionHandler:nil];
-    }];
-    
-    UIAlertAction *cancel = [UIAlertAction actionWithTitle:@"Cancel"
-                                                     style:UIAlertActionStyleCancel
-                                                   handler:nil];
-    
-    [alert addAction:openSettings];
-    [alert addAction:cancel];
-    
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
 #pragma mark - 数据加载
 
 - (void)loadRecentConfigs {
@@ -488,7 +449,7 @@
 #pragma mark - 按钮处理
 
 - (void)handlePairButton:(id)sender  {
-    NSLog(@"点击了 Pair 按钮!!!");
+    MAINLOG(@"点击了 Pair 按钮!!!");
 	// 检查设备选择
     if (!self.selectedDevice) {
         [self showMessage:@"Please select a device first"];
@@ -546,7 +507,7 @@
 }
 
 - (void)handleStatusButton:(id)sender  {
-	    NSLog(@"点击了 Status 按钮!!!");
+	    MAINLOG(@"点击了 Status 按钮!!!");
     // 检查设备选择
     if (!self.selectedDevice) {
         [self showMessage:@"Please select a device first"];
@@ -568,21 +529,16 @@
     }
 }
 //#pragma mark - 扫描设备	
-- (void)handleSearchButton:(id)sender  {
-	    NSLog(@"点击了 Search 按钮!!!");
-    // 创建 CBCentralManager 实例
-    if (!_centralManager) {
-        _centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
-    }
+- (void)handleSearchButton:(id)sender {
+    MAINLOG(@"Search button tapped!");
     
-    // 跳转到扫描页面
     // 创建ScanViewController
-    ScanViewController *scanVC = [[ScanViewController alloc] initWithCentralManager:_centralManager];
+    ScanViewController *scanVC = [[ScanViewController alloc] init]; // 使用新的初始化方法
     scanVC.delegate = self;
     
     // 创建导航控制器包装ScanViewController
     UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:scanVC];
-    navController.modalPresentationStyle = UIModalPresentationFullScreen; // 或者用UIModalPresentationPageSheet
+    navController.modalPresentationStyle = UIModalPresentationFullScreen;
 
     // 模态展示
     [self presentViewController:navController animated:YES completion:nil];
@@ -606,7 +562,7 @@
 //#pragma mark - 设置按钮处理KK
 
 - (void)showServerHistoryMenu:(id)sender  {
-		    NSLog(@"点击了 recentServer 按钮!!!");
+		    MAINLOG(@"点击了 recentServer 按钮!!!");
     NSArray<NSDictionary *> *recentServers = [self.configStorage getServerConfigs];
     if (recentServers.count == 0) {
         [self showMessage:@"No recent servers available"];
@@ -888,6 +844,9 @@
     if (device.deviceId) {
         [info appendFormat:@"deviceId:%@\n", device.deviceId];
     }
+    if (device.deviceType) {
+        [info appendFormat:@"deviceType:%@\n", device.deviceType];
+    }
     if (device.uid) {
         [info appendFormat:@"uid:%@\n", device.uid];
     }
@@ -928,17 +887,7 @@
     if (device.version) {
         [info appendFormat:@"version:%@\n", device.version];
     }
-    if (device.productorName == ProductorSleepBoardHS) {
-        if (device.sleepaceProtocolType > 0) {
-            [info appendFormat:@"sleepaceProtocolType:%ld\n", (long)device.sleepaceProtocolType];
-        }
-        if (device.sleepaceDeviceType > 0) {
-            [info appendFormat:@"sleepaceDeviceType:%ld\n", (long)device.sleepaceDeviceType];
-        }
-        if (device.sleepaceVersionCode) {
-            [info appendFormat:@"sleepaceVersionCode:%@\n", device.sleepaceVersionCode];
-        }
-    }
+    // 这里有一个多余的大括号，已删除
     if (device.lastUpdateTime > 0) {
         NSDate *date = [NSDate dateWithTimeIntervalSince1970:device.lastUpdateTime];
         NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
@@ -1019,25 +968,25 @@
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central {
     switch (central.state) {
         case CBManagerStatePoweredOn:
-            NSLog(@"Bluetooth is powered on and ready.");
+            MAINLOG(@"Bluetooth is powered on and ready.");
             break;
         case CBManagerStatePoweredOff:
-            NSLog(@"Bluetooth is powered off.");
+            MAINLOG(@"Bluetooth is powered off.");
             break;
         case CBManagerStateUnauthorized:
-            NSLog(@"Bluetooth is unauthorized.");
+            MAINLOG(@"Bluetooth is unauthorized.");
             break;
         case CBManagerStateUnsupported:
-            NSLog(@"Bluetooth is unsupported on this device.");
+            MAINLOG(@"Bluetooth is unsupported on this device.");
             break;
         case CBManagerStateResetting:
-            NSLog(@"Bluetooth is resetting.");
+            MAINLOG(@"Bluetooth is resetting.");
             break;
         case CBManagerStateUnknown:
-            NSLog(@"Bluetooth state is unknown.");
+            MAINLOG(@"Bluetooth state is unknown.");
             break;
         default:
-            NSLog(@"Bluetooth state is not handled.");
+            MAINLOG(@"Bluetooth state is not handled.");
             break;
     }
 }
@@ -1068,7 +1017,7 @@
     [self adjustLayoutForChildContainer:container withSize:newSize];
     
     // 输出日志
-    NSLog(@"Child container size changed to: %@", NSStringFromCGSize(newSize));
+    MAINLOG(@"Child container size changed to: %@", NSStringFromCGSize(newSize));
 }
 
 - (void)adjustLayoutForChildContainer:(id<UIContentContainer>)container withSize:(CGSize)size {

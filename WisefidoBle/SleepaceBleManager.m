@@ -4,11 +4,13 @@
 
 #import "SleepaceBleManager.h"
 
+
+
 // Define log macro for debugging
 #define SLPLOG(fmt, ...) NSLog((@"[SleepaceBleManager] " fmt), ##__VA_ARGS__)
 
 // Define timeout constants
-#define DEFAULT_SCAN_TIMEOUT 10.0
+#define DEFAULT_SCAN_TIMEOUT 5.0
 #define DEFAULT_CONFIG_TIMEOUT 30.0
 #define DEFAULT_CONNECT_TIMEOUT 5.0
 
@@ -29,7 +31,9 @@
 @property (nonatomic, strong) DeviceInfo *currentDevice;
 @property (nonatomic, copy) NSString *currentDeviceUUID;
 @property (nonatomic, strong) CBPeripheral *currentPeripheral;
-@property (nonatomic, strong) NSMutableDictionary *deviceCache;
+@property (nonatomic, strong) NSMutableDictionary *deviceCache; // 存储扫描结果(DeviceInfo对象)
+@property (nonatomic, strong) NSMutableSet *discoveredDeviceUUIDs; // 存储已发现设备的UUID
+@property (nonatomic, strong) NSMutableDictionary *rssiNotifiedDevices; // 记录已获取RSSI的设备
 
 // State flags
 @property (nonatomic, assign) BOOL isScanning;
@@ -51,7 +55,7 @@
 - (void)connectionTimedOut;
 - (void)configurationTimedOut:(NSTimer *)timer;
 
-- (DeviceInfo *)createDeviceInfoFromPeripheral:(CBPeripheral *)peripheral withName:(NSString *)name;
+//- (DeviceInfo *)createDeviceInfoFromPeripheral:(CBPeripheral *)peripheral withName:(NSString *)name;
 - (NSString *)stringForTransferStatus:(SLPDataTransferStatus)status;
 
 - (void)invalidateScanTimer;
@@ -82,9 +86,10 @@
         _bleManager = [SLPBLEManager sharedBLEManager];
         _bleWifiConfig = [SLPBleWifiConfig sharedBleWifiConfig];
         
-        // Initialize direct CoreBluetooth manager
+         //Initialize direct CoreBluetooth manager
         _cbManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
         
+
         // Initialize status variables
         _isScanning = NO;
 		_isConnecting = NO;
@@ -96,6 +101,7 @@
 		_currentPeripheral = nil;
 		_currentDevice = nil;
 		_currentDeviceUUID = nil;
+
 
         
         // Register for notifications
@@ -123,6 +129,74 @@
     return self;
 }
 
+
+// SDK扫描方式
+- (void)startSDKScanWithTimeout:(NSTimeInterval)timeout {
+    // 使用SDK方法进行扫描
+    __weak typeof(self) weakSelf = self;
+    BOOL scanStarted = [_bleManager scanBluetoothWithTimeoutInterval:timeout*0.6 
+                                                  completion:^(SLPBLEScanReturnCodes code, 
+                                                              NSInteger handleID, 
+                                                              SLPPeripheralInfo *peripheralInfo) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        
+        // 处理扫描结果
+        if (code == SLPBLEScanReturnCode_Normal && peripheralInfo && peripheralInfo.peripheral) {
+            // 获取设备信息
+            CBPeripheral *peripheral = peripheralInfo.peripheral;
+            NSString *deviceName = peripheralInfo.name ?: @"Unknown"; //BM87224601903
+            NSString *deviceType = peripheral.name ?: @"Unknown";  //bm8701-2-ble
+            NSString *uuid = peripheral.identifier.UUIDString;
+            SLPLOG(@"SDK scanresult - name: %@, deviceType:%@,UUID: %@", deviceName,deviceType,uuid);
+                        
+            // 创建设备信息对象
+            DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:ProductorSleepBoardHS
+                                                       deviceName:deviceName
+                                                         deviceId:uuid
+                                                       deviceType:deviceType  // 设置设备类型
+                                                          version:nil        // 版本暂不设置
+                                                              uid:nil        // UID暂不设置
+                                                      macAddress:nil
+                                                             uuid:uuid
+                                                             rssi:-255];     // 初始RSSI值
+           
+            // 通知扫描回调
+            if (strongSelf->_scanCallback) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    strongSelf->_scanCallback(deviceInfo);
+                });
+            }
+        } 
+        else if (code != SLPBLEScanReturnCode_Normal) {
+            // 扫描结束或出错
+            NSString *codeString = @"Unknown";
+            switch (code) {
+                case SLPBLEScanReturnCode_Disable:
+                    codeString = @"Disabled";
+                    break;
+                case SLPBLEScanReturnCode_TimeOut:
+                    codeString = @"Timeout";
+                    break;
+                default:
+                    codeString = [NSString stringWithFormat:@"Code %ld", (long)code];
+                    break;
+            }
+            
+            SLPLOG(@"Scan ended, reason: %@", codeString);
+            strongSelf->_isScanning = NO;
+            [strongSelf invalidateScanTimer];
+        }
+    }];
+    
+    if (!scanStarted) {
+        SLPLOG(@"Failed to start scan, Bluetooth may be disabled or permission denied");
+        _isScanning = NO;
+    } else {
+        SLPLOG(@"Sleepace SDK scan started");
+    }
+}
+
 - (void)dealloc {
     SLPLOG(@"Releasing SleepaceBleManager");
     
@@ -134,7 +208,7 @@
     [self invalidateConfigTimer];
 }
 
-#pragma mark - Public Methods - Scanning
+// CBCentralManagerDelegate 检测蓝牙状态变化
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central {
     NSString *stateString;
     switch (central.state) {
@@ -164,44 +238,7 @@
     SLPLOG(@"CoreBluetooth state updated: %@", stateString);
 }
 
-- (void)centralManager:(CBCentralManager *)central
- didDiscoverPeripheral:(CBPeripheral *)peripheral
-     advertisementData:(NSDictionary<NSString *,id> *)advertisementData
-                  RSSI:(NSNumber *)RSSI {
-    NSString *name = peripheral.name ?:
-                    [advertisementData objectForKey:CBAdvertisementDataLocalNameKey] ?:
-                    @"Unknown";
-    
-    SLPLOG(@"CoreBluetooth discovered device: %@ (UUID: %@, RSSI: %@)",
-           name, peripheral.identifier.UUIDString, RSSI);
-    
-    // Create DeviceInfo object
-    DeviceInfo *deviceInfo = [[DeviceInfo alloc]
-                             initWithProductorName:ProductorSleepBoardHS
-                                       deviceName:name
-                                         deviceId:peripheral.identifier.UUIDString
-                                      macAddress:nil
-                                            uuid:peripheral.identifier.UUIDString
-                                            rssi:[RSSI integerValue]];
-    
-    // Cache the peripheral for later use
-    if (!_deviceCache) {
-        _deviceCache = [NSMutableDictionary dictionary];
-    }
-    [_deviceCache setObject:peripheral forKey:peripheral.identifier.UUIDString];
-    
-    // Notify scan callback
-    if (_scanCallback) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            self->_scanCallback(deviceInfo);
-        });
-    }
-}
-- (void)setScanCallback:(SleepaceScanCallback)callback {
-    _scanCallback = callback;
-    SLPLOG(@"Scan callback set");
-}
-
+#pragma mark - Public Methods - Scanning
 - (void)startScan {
     SLPLOG(@"Starting scan (default timeout: %.1f seconds)", DEFAULT_SCAN_TIMEOUT);
     [self startScanWithTimeout:DEFAULT_SCAN_TIMEOUT filterPrefix:nil filterType:FilterTypeDeviceName];
@@ -209,132 +246,80 @@
 
 - (void)startScanWithTimeout:(NSTimeInterval)timeout 
                filterPrefix:(nullable NSString *)filterPrefix
-                 filterType:(FilterType)filterType {
+                 filterType:(FilterType)filterType { 
     if (_isScanning) {
         SLPLOG(@"Scan already in progress, ignoring request");
         return;
     }
-    
-    // Check Bluetooth status
+        
+    // 检查蓝牙是否打开 (使用SDK方法)
     if (![self.bleManager blueToothIsOpen]) {
-        SLPLOG(@"Bluetooth not enabled, cannot start scan");
+        SLPLOG(@"Bluetooth not enabled according to SDK, requesting to enable");
+        
+        // 设置一个短暂的延迟，等待蓝牙初始化
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if ([self.bleManager blueToothIsOpen] || self.cbManager.state == CBManagerStatePoweredOn) {
+                SLPLOG(@"Bluetooth now available, starting delayed scan");
+                [self startScanWithTimeout:timeout filterPrefix:filterPrefix filterType:filterType];
+            } else {
+                SLPLOG(@"Bluetooth still not available after delay");
+                // 通知UI蓝牙未准备好
+                if (self->_scanCallback) {
+                    DeviceInfo *errorInfo = [[DeviceInfo alloc] initWithProductorName:ProductorSleepBoardHS
+                                            deviceName:@"ERROR: Bluetooth not ready"
+                                            deviceId:@"error"  // 注意这里的u@"error"是错误的，应该是@"error"
+                                            deviceType:nil     // 设置设备类型
+                                            version:nil        // 版本暂不设置
+                                            uid:nil            // UID暂不设置
+                                            macAddress:nil
+                                            uuid:@"error-uuid" // uuid变量可能未定义，所以用一个固定值替代
+                                            rssi:-255];       // 初始RSSI值
+
+                    self->_scanCallback(errorInfo);
+                }
+            }
+        });
         return;
     }
-    
-    // Clear device cache
-    [_deviceCache removeAllObjects];
-    
-    // Set timeout
+
+    // 设置扫描超时
     NSTimeInterval scanTimeout = (timeout > 0) ? timeout : DEFAULT_SCAN_TIMEOUT;
-    
-    SLPLOG(@"Starting device scan, timeout: %.1f seconds, filterPrefix: %@, filterType: %ld", 
-           scanTimeout, filterPrefix ?: @"None", (long)filterType);
-    
-    // Set scanning flag
+
+    // 更新UI状态
     _isScanning = YES;
-    
-    // Set scan timeout timer
-    self.scanTimer = [NSTimer scheduledTimerWithTimeInterval:scanTimeout
-                                                      target:self
-                                                    selector:@selector(scanTimedOut)
-                                                    userInfo:nil
-                                                     repeats:NO];
-    
-    // Call SDK to start scanning
-    BOOL scanStarted = [_bleManager scanBluetoothWithTimeoutInterval:scanTimeout completion:^(SLPBLEScanReturnCodes code, NSInteger handleID, SLPPeripheralInfo *peripheralInfo) {
-        if (code == SLPBLEScanReturnCode_Normal && peripheralInfo && peripheralInfo.peripheral) {
-            // Get device information
-            CBPeripheral *peripheral = peripheralInfo.peripheral;
-            NSString *name = peripheralInfo.name ?: peripheral.name ?: @"Unknown";
-            NSString *uuid = peripheral.identifier.UUIDString;
-            
-            // Apply filter if specified
-            if (filterPrefix.length > 0) {
-                BOOL shouldSkip = YES;
-                
-                switch (filterType) {
-                    case FilterTypeDeviceName:
-                        shouldSkip = ![name containsString:filterPrefix];
-                        break;
-                    case FilterTypeMac:
-                        // iOS doesn't provide MAC address, so just check UUID
-                        shouldSkip = ![uuid containsString:filterPrefix];
-                        break;
-                    case FilterTypeUUID:
-                        shouldSkip = ![uuid containsString:filterPrefix];
-                        break;
-                }
-                
-                if (shouldSkip) {
-                    return;
-                }
-            }
-            
-            SLPLOG(@"Device found: %@ (UUID: %@)", name, uuid);
-            
-            // Create device info object
-            DeviceInfo *deviceInfo = [self createDeviceInfoFromPeripheral:peripheral withName:name];
-            
-            if (deviceInfo) {
-                // Cache device to avoid duplicates
-                NSString *deviceId = deviceInfo.deviceId;
-                if (![self->_deviceCache objectForKey:deviceId]) {
-                    [self->_deviceCache setObject:deviceInfo forKey:deviceId];
-                    
-                    // Notify app about new device
-                    if (self.scanCallback) {
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            self.scanCallback(deviceInfo);
-                        });
-                    }
-                }
-            }
-        } else if (code != SLPBLEScanReturnCode_Normal) {
-            // Scan ended or error
-            NSString *codeString = @"Unknown";
-            switch (code) {
-                case SLPBLEScanReturnCode_Disable:
-                    codeString = @"Disabled";
-                    break;
-                case SLPBLEScanReturnCode_TimeOut:
-                    codeString = @"Timeout";
-                    break;
-                default:
-                    codeString = [NSString stringWithFormat:@"Code %ld", (long)code];
-                    break;
-            }
-            
-            SLPLOG(@"Scan ended, reason: %@", codeString);
-            self.isScanning = NO;
-            [self invalidateScanTimer];
-        }
-    }];
-    
-    if (!scanStarted) {
-        SLPLOG(@"Failed to start scan, Bluetooth may be disabled or permission denied");
-        _isScanning = NO;
-        [self invalidateScanTimer];
-    }
+    SLPLOG(@"Starting scan (timeout: %.1f seconds)", timeout);
+
+
+    // 先调用SDK扫描方法
+    [self startSDKScanWithTimeout:timeout];
+ 
 }
 
 - (void)stopScan {
+    SLPLOG(@"stopScan called");
+    
     if (!_isScanning) {
+        SLPLOG(@"No scan in progress, ignoring stop request");
         return;
     }
-    
-    SLPLOG(@"Stopping CoreBluetooth scan");
-    // Stop CoreBluetooth scanning
+   
+    // 使用 SDK 方法停止扫描
+    [_bleManager stopAllPeripheralScan];
+     // 同时停止iOS原生扫描
     [_cbManager stopScan];
-    
-    //SLPLOG(@"Stopping scan");
-    // Stop SDK scanning
-    //[_bleManager stopAllPeripheralScan];
-    
-    // Cancel timer
-    [self invalidateScanTimer];
-    
+     
+    // 重置扫描标志
     _isScanning = NO;
+    
+    SLPLOG(@"Scan stopped");
 }
+
+//扫描回调设置
+- (void)setScanCallback:(SleepaceScanCallback)callback {
+    _scanCallback = callback;
+    SLPLOG(@"Scan callback set");
+}
+
 
 #pragma mark - Public Methods - Configuration
 
@@ -482,6 +467,7 @@
 }
 
 #pragma mark - Public Methods - Status Query
+
 - (void)queryDeviceStatus:(DeviceInfo *)deviceInfo
                completion:(SleepaceStatusCallback)completion {
     // 检查 CBPeripheral 的 UUID 是否与 DeviceInfo 的 UUID 匹配
@@ -652,27 +638,6 @@
 }
 
 #pragma mark - Private Methods - Device Info Creation
-
-// 创建设备信息对象
-- (DeviceInfo *)createDeviceInfoFromPeripheral:(CBPeripheral *)peripheral withName:(NSString *)name {
-    // 创建对象时必须指定 ProductorSleepBoardHS
-    DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:ProductorSleepBoardHS
-                                                            deviceName:name
-                                                              deviceId:peripheral.identifier.UUIDString
-                                                           macAddress:nil
-                                                                 uuid:peripheral.identifier.UUIDString
-                                                                 rssi:-255]; // 初始 RSSI 值，后续会更新
-    
-    // 尝试从 peripheral 获取额外的 Sleepace 特有信息
-    @try {
-        deviceInfo.sleepaceDeviceType = [self.bleManager deviceTypeOfPeripheral:peripheral];
-        deviceInfo.sleepaceVersionCode = [peripheral.name stringByReplacingOccurrencesOfString:@"SleepaceHS_" withString:@""];
-    } @catch (NSException *exception) {
-        SLPLOG(@"Failed to get Sleepace device-specific info: %@", exception.reason);
-    }
-    
-    return deviceInfo;
-}
 
 #pragma mark - Public Methods - connectDevice/Disconnect
 - (void)connectDevice:(DeviceInfo *)device {

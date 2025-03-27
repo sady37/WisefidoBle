@@ -10,8 +10,13 @@
 #import "ConfigViewController.h"
 #import "ConfigModels.h"
 
+
 // 日志宏定义
 #define SCANLOG(fmt, ...) NSLog((@"[ScanViewController] " fmt), ##__VA_ARGS__)
+// 扫描超时常量定义
+#define RADAR_SCAN_TIMEOUT     5.0  // 雷达设备扫描超时时间（秒）
+#define SLEEPACE_SCAN_TIMEOUT  5.0  // Sleepace设备扫描超时时间（秒）
+#define RSSI_SCAN_TIMEOUT      6.0  // RSSI扫描超时时间（秒）
 
 #pragma mark - DeviceTableViewCell 声明
 
@@ -29,7 +34,7 @@
 
 #pragma mark - ScanViewController 私有接口
 
-@interface ScanViewController ()
+@interface ScanViewController () <CBPeripheralDelegate>
 
 // UI 组件
 @property (nonatomic, strong) UITableView *tableView; //显示设备列表
@@ -48,9 +53,14 @@
 @property (nonatomic, strong) ConfigStorage *configStorage;
 @property (nonatomic, assign) FilterType currentFilterType;
 @property (nonatomic, copy) NSString *currentFilterPrefix;
-@property (nonatomic, strong) CBCentralManager *centralManager;
-
+@property (nonatomic, strong) CBCentralManager *cbManager;// iOS 蓝牙管理器用于RSSI更新
+@property (nonatomic, strong) NSMutableDictionary<NSString *, DeviceInfo *> *deviceDictionary; // 使用 UUID 作为键进行去重
+@property (nonatomic, assign) BOOL isRssiScanning; // 标记是否正在进行RSSI扫描
+@property (nonatomic, strong) NSTimer *radarScanTimer; // Radar扫描定时器
+@property (nonatomic, strong) NSTimer *sleepaceScanTimer; // Sleepace扫描定时器
+@property (nonatomic, strong) NSTimer *rssiScanTimer; // RSSI扫描定时器
 @end
+
 
 #pragma mark - DeviceTableViewCell 实现
 
@@ -128,7 +138,8 @@
 
 - (void)configure:(DeviceInfo *)device {
     _deviceNameLabel.text = device.deviceName;
-    _macAddressLabel.text = device.macAddress ?: @"Unknown";
+    SCANLOG(@"Device: %@, deviceType: %@", device.deviceName, device.deviceType);
+    _macAddressLabel.text = device.deviceType ?: @"Unknown";   //macAddress iOS only uuid, but too long
     _rssiLabel.text = [NSString stringWithFormat:@"%ld dBm", (long)device.rssi]; // Explicit cast to 'long'
     
     // 根据RSSI值设置信号强度指示器颜色
@@ -148,12 +159,11 @@
 @implementation ScanViewController
 
 #pragma mark - 初始化方法
-
-- (instancetype)initWithCentralManager:(CBCentralManager *)centralManager {
+- (instancetype)init {
     self = [super init];
     if (self) {
-        _centralManager = centralManager;
         _deviceList = [NSMutableArray array];
+        _deviceDictionary = [NSMutableDictionary dictionary]; // 初始化设备字典,去重
         _configStorage = [[ConfigStorage alloc] init];
         _currentScanModule = ProductorRadarQL; // 默认使用雷达模块
         _isScanning = NO;
@@ -180,7 +190,10 @@
     
 	// 检查蓝牙权限
     //[self checkBluetoothPermissions];
-    
+
+    //初始化蓝牙中心管理器
+    _isRssiScanning = NO;
+
     // 更新UI显示
     [self updateFilterHint];
 	[self updateScanButtonState:NO]; // 初始化扫描按钮状态为未扫描
@@ -199,12 +212,35 @@
     [self stopScan];
 }
 
+// 添加懒加载方法
+- (CBCentralManager *)cbManager {
+    if (!_cbManager) {
+        SCANLOG(@"Delay init CBCentralManager (only when need)");
+        
+        // 使用专用队列而非主队列，避免阻塞UI
+        dispatch_queue_t queue = dispatch_queue_create("com.app.bleQueue", DISPATCH_QUEUE_SERIAL);
+        
+        NSDictionary *options = @{
+            CBCentralManagerOptionShowPowerAlertKey: @NO,  // 不显示系统蓝牙提示
+        };
+        
+        _cbManager = [[CBCentralManager alloc] initWithDelegate:self 
+                                                        queue:queue 
+                                                    options:options];
+    }
+    return _cbManager;
+}
+
 - (void)dealloc {
     // 确保停止扫描
     [self stopScan];
     
     // 清理资源
+    _cbManager.delegate = nil;
+    _cbManager = nil;
+    
     _deviceList = nil;
+    _deviceDictionary = nil;
     _configStorage = nil;
 }
 
@@ -376,12 +412,14 @@
 }
 
 - (void)updateScanButtonState:(BOOL)scanning {
+    SCANLOG(@"Updating scan button state to: %@", scanning ? @"STOP" : @"SCAN");
     _isScanning = scanning;
     [_scanButton setTitle:(scanning ? @"STOP" : @"SCAN") forState:UIControlStateNormal];
     _scanButton.backgroundColor = scanning ? [UIColor systemRedColor] : [UIColor systemBlueColor];
 }
 
 - (void)startScan {
+    SCANLOG(@"Starting scan with filter prefix:"); 
     // 根据当前选择的模块获取正确的过滤前缀
     switch (_currentScanModule) {
         case ProductorRadarQL:
@@ -401,6 +439,7 @@
     
     // 清空设备列表
     [_deviceList removeAllObjects];
+    [_deviceDictionary removeAllObjects];
     [_tableView reloadData];
     
     // 更新UI状态
@@ -418,48 +457,308 @@
     }
 }
 
-- (void)stopScan {
-    if (!_isScanning) return;
-    
-    // 停止所有扫描
-    [_centralManager stopScan];
-    
-    // 更新UI状态
-    [self updateScanButtonState:NO];
-}
-
 - (void)startRadarScan {
     SCANLOG(@"Starting Radar scan with filter prefix: %@, type: %@", 
            _currentFilterPrefix ?: @"None", 
            (long)_currentFilterType == FilterTypeDeviceName ? @"DeviceName" : (_currentFilterType == FilterTypeMac ? @"MAC" : @"UUID"));
     
+    // 使用 RadarBleManager 单例扫描
+    RadarBleManager *manager = [RadarBleManager sharedManager];
+    
     // 设置扫描回调
-    [_centralManager scanForPeripheralsWithServices:nil options:@{CBCentralManagerScanOptionAllowDuplicatesKey: @NO}];
+    __weak typeof(self) weakSelf = self;
+    [manager setScanCallback:^(DeviceInfo * _Nonnull deviceInfo) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+
+        SCANLOG(@"Received device: %@, deviceType:%@, UUID: %@", deviceInfo.deviceName,deviceInfo.deviceType,deviceInfo.uuid);
+        
+        // 使用字典进行去重和更新
+        [strongSelf addOrUpdateDevice:deviceInfo];
+    }];
+    
+    // 开始扫描
+    SCANLOG(@"will apply  RadarBleManager' startScan");
+    [manager startScanWithTimeout:RADAR_SCAN_TIMEOUT 
+                     filterPrefix:_currentFilterPrefix 
+                       filterType:_currentFilterType];
+    SCANLOG(@"RadarBleManager end Scan");
+
+    // 设置扫描超时定时器
+    self.radarScanTimer = [NSTimer scheduledTimerWithTimeInterval:RADAR_SCAN_TIMEOUT
+                                                        target:self
+                                                        selector:@selector(radarScanTimeout)
+                                                        userInfo:nil
+                                                        repeats:NO];
+}
+
+// Radar扫描超时处理
+- (void)radarScanTimeout {
+    SCANLOG(@"Radar scan timeout reached");
+    
+    // 停止Radar扫描
+    [[RadarBleManager sharedManager] stopScan];
+    
+    // 如果是当前扫描模式，开始RSSI扫描
+    if (_currentScanModule == ProductorRadarQL || _currentScanModule == ProductorEspBle) {
+        // 先过滤设备
+        [self filterDevices];
+        
+        // 然后进行RSSI扫描更新，不需要
+        //[self startRssiScan];
+    }
+    
 }
 
 - (void)startSleepaceScan {
-    SCANLOG(@"Starting Sleepace scan");
+    SCANLOG(@"Starting Sleep scan");
     
     // 获取 SleepaceBleManager 单例
     SleepaceBleManager *manager = [SleepaceBleManager getInstance:self];
-    SCANLOG(@"SleepaceBleManager 实例: %@", manager ? @"有效" : @"NULL");
+    SCANLOG(@"SleepBleManager instance: %@", manager ? @"vail" : @"NULL");
     
     // 设置扫描回调
+    __weak typeof(self) weakSelf = self;
     [manager setScanCallback:^(DeviceInfo * _Nonnull deviceInfo) {
-        SCANLOG(@"收到设备: %@", deviceInfo.deviceName);
-        
-        // 添加到设备列表并更新UI
-        if (![self->_deviceList containsObject:deviceInfo]) {
-            [self->_deviceList addObject:deviceInfo];
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+
+        // 检查设备ID是否为错误标记
+        if ([deviceInfo.deviceId isEqualToString:@"error"]) {
+            // 显示蓝牙错误提示
             dispatch_async(dispatch_get_main_queue(), ^{
-                [self->_tableView reloadData];
+                UIAlertController *alert = [UIAlertController 
+                    alertControllerWithTitle:@"Bluetooth Error" 
+                    message:deviceInfo.deviceName
+                    preferredStyle:UIAlertControllerStyleAlert];
+                
+                [alert addAction:[UIAlertAction 
+                    actionWithTitle:@"OK" 
+                    style:UIAlertActionStyleDefault 
+                    handler:nil]];
+                
+                [self presentViewController:alert animated:YES completion:nil];                
+                // 更新UI状态
+                [self updateScanButtonState:NO];
             });
+            return;
         }
+        SCANLOG(@"Received Sleep device: %@, deviceType:%@, UUID: %@", deviceInfo.deviceName, deviceInfo.deviceType,deviceInfo.uuid);
+        
+        // 使用字典进行去重和更新
+        [strongSelf addOrUpdateDevice:deviceInfo];
+
     }];
-    
+
     // 启动扫描
-    [manager startScan];
-    SCANLOG(@"已调用 SleepaceBleManager 的 startScan");
+    SCANLOG(@"will apply SleepaceBleManager startScan");
+    [manager startScanWithTimeout:SLEEPACE_SCAN_TIMEOUT 
+                     filterPrefix:_currentFilterPrefix 
+                       filterType:_currentFilterType];
+    SCANLOG(@"SleepaceBleManager end Scan");
+
+
+    // 设置扫描超时定时器
+    self.sleepaceScanTimer = [NSTimer scheduledTimerWithTimeInterval:SLEEPACE_SCAN_TIMEOUT
+                                                            target:self
+                                                        selector:@selector(sleepaceScanTimeout)
+                                                        userInfo:nil
+                                                            repeats:NO];
+    
+}
+
+// Sleepace扫描超时处理
+- (void)sleepaceScanTimeout {
+    SCANLOG(@"Sleepace scan timeout reached");
+    
+    // 停止Sleepace扫描
+    [[SleepaceBleManager getInstance:self] stopScan];
+    
+    // 如果是当前扫描模式，开始RSSI扫描
+    if (_currentScanModule == ProductorSleepBoardHS) {
+        // 先过滤设备
+        [self filterDevices];
+        
+        // 然后进行RSSI扫描更新
+        [self startRssiScan];
+    }
+}
+
+// 新增统一的设备添加/更新方法
+- (void)addOrUpdateDevice:(DeviceInfo *)device {
+    if (!device.uuid || device.uuid.length == 0) {
+        SCANLOG(@"Device has no UUID, cannot add to list: %@", device.deviceName);
+        return;
+    }
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // 检查是否已经存在此设备 (通过UUID检查)
+        DeviceInfo *existingDevice = self->_deviceDictionary[device.uuid];
+        
+        if (existingDevice) {
+            // 更新现有设备的信息
+            SCANLOG(@"Updating existing device: %@", device.deviceName);
+            
+            // 仅更新变化的数据
+            if (device.rssi != kSignalUnavailable) {
+                existingDevice.rssi = device.rssi;
+            }
+
+        } else {
+            // 添加新设备到字典和列表中
+            SCANLOG(@"Adding new device: %@", device.deviceName);
+            self->_deviceDictionary[device.uuid] = device;
+            [self->_deviceList addObject:device];
+        }
+        
+        // 更新表格
+        [self->_tableView reloadData];
+    });
+}
+
+
+- (void)stopScan {
+    if (!_isScanning) return;
+    
+    SCANLOG(@"Stopping all scans");
+    
+    // 根据当前扫描模块停止扫描
+    switch (_currentScanModule) {
+        case ProductorRadarQL:
+        case ProductorEspBle:
+            [[RadarBleManager sharedManager] stopScan];
+            break;
+        case ProductorSleepBoardHS:
+            [[SleepaceBleManager getInstance:self] stopScan];
+            break;
+    }
+    
+    // 停止RSSI扫描
+    [self stopRssiScan];
+    
+    // 取消所有定时器
+    if (_rssiScanTimer && [_rssiScanTimer isValid]) {
+        [_rssiScanTimer invalidate];
+        _rssiScanTimer = nil;
+    }
+
+    if (_radarScanTimer && [_radarScanTimer isValid]) {
+        [_radarScanTimer invalidate];
+        _radarScanTimer = nil;
+    }
+    
+    if (_sleepaceScanTimer && [_sleepaceScanTimer isValid]) {
+        [_sleepaceScanTimer invalidate];
+        _sleepaceScanTimer = nil;
+    }
+    
+    // 更新UI状态
+    [self updateScanButtonState:NO];
+}
+
+
+#pragma mark - RSSI扫描
+// RSSI扫描的方法
+- (void)startRssiScan {
+    if (_isRssiScanning) {
+        SCANLOG(@"RSSI is scanning");
+        return;
+    }
+
+    // 通过懒加载获取 cbManager
+    CBCentralManager *manager = self.cbManager;
+
+    if (manager.state != CBManagerStatePoweredOn) {
+        SCANLOG(@"Bluetooth not ready, state: %ld, will retry after delay", (long)manager.state);
+        
+        // Single retry with dispatch_after
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (self.cbManager.state == CBManagerStatePoweredOn) {
+                SCANLOG(@"Bluetooth now ready after delay, starting RSSI scan");
+                [self performRssiScan];
+            } else {
+                SCANLOG(@"Bluetooth still not ready after delay, state: %ld, aborting RSSI scan", (long)self.cbManager.state);
+                // Notify user
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self updateScanButtonState:NO];
+                });
+            }
+        });
+        return;
+    }
+    
+    // 蓝牙已准备好，执行RSSI扫描
+    [self performRssiScan];
+}
+
+// 实际执行RSSI扫描
+- (void)performRssiScan {
+    if (_isRssiScanning) {
+        return;
+    }
+    
+    SCANLOG(@"Starting one-time RSSI scan for all discovered devices");
+    _isRssiScanning = YES;
+    
+    NSDictionary *options = @{
+        CBCentralManagerScanOptionAllowDuplicatesKey: @NO  //不重复扫描
+    };
+    
+    [self.cbManager scanForPeripheralsWithServices:nil options:options];
+        
+    // 设置扫描超时
+    _rssiScanTimer = [NSTimer scheduledTimerWithTimeInterval:RSSI_SCAN_TIMEOUT
+                                                     target:self
+                                                   selector:@selector(stopRssiScan)
+                                                   userInfo:nil
+                                                    repeats:NO];
+}
+//connect device to get rssi
+- (void)centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral advertisementData:(NSDictionary<NSString *,id> *)advertisementData RSSI:(NSNumber *)RSSI {
+    NSString *uuid = peripheral.identifier.UUIDString;
+    NSInteger rssiValue = [RSSI integerValue];
+    
+    SCANLOG(@"Discovered peripheral with UUID: %@, RSSI: %ld", uuid, (long)rssiValue);
+    
+    // 检查此设备是否在我们的字典中
+    DeviceInfo *device = _deviceDictionary[uuid];
+    if (device) {
+        // 更新 RSSI 值
+        device.rssi = rssiValue;
+        device.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
+        
+        // 更新表格视图
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSInteger index = [self->_deviceList indexOfObject:device];
+            if (index != NSNotFound) {
+                NSIndexPath *indexPath = [NSIndexPath indexPathForRow:index inSection:0];
+                [self->_tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+            }
+        });
+    }
+}
+
+// 停止RSSI扫描
+- (void)stopRssiScan {
+    if (!_isRssiScanning) {
+        return;
+    }
+    
+    SCANLOG(@"Stopping RSSI scan");
+    _isRssiScanning = NO;
+    
+    // 停止蓝牙扫描
+    [_cbManager stopScan];
+    
+    // 取消定时器
+    if (_rssiScanTimer && [_rssiScanTimer isValid]) {
+        NSTimer *updateTimer = [_rssiScanTimer.userInfo objectForKey:@"updateTimer"];
+        if (updateTimer && [updateTimer isValid]) {
+            [updateTimer invalidate];
+        }
+        [_rssiScanTimer invalidate];
+        _rssiScanTimer = nil;
+    }
 }
 
 #pragma mark - UITableViewDelegate & UITableViewDataSource
@@ -490,7 +789,7 @@
 
 	// 确保索引在有效范围内
 	if (indexPath.row < 0 || indexPath.row >= _deviceList.count) {
-		NSLog(@"Invalid indexPath.row: %ld", (long)indexPath.row);
+		SCANLOG(@"Invalid indexPath.row: %ld", (long)indexPath.row);
 		return;
 	}
 	
@@ -530,31 +829,63 @@
 }
 
 #pragma mark - 设备过滤
-
 - (void)filterDevices {
-    // 如果过滤文本为空，不进行过滤
-    NSString *filterText = _filterTextField.text;
-    if (filterText.length == 0) {
-        // 重新加载表格
-        [_tableView reloadData];
-        return;
+    // 清空设备列表准备过滤
+    [_deviceList removeAllObjects];
+    
+    // 获取当前应该使用的过滤文本
+    NSString *filterText;
+    switch (_currentScanModule) {
+        case ProductorRadarQL:
+            filterText = [_configStorage getRadarDeviceName];
+            // 对于Radar，我们总是按设备名称过滤
+            _currentFilterType = FilterTypeDeviceName;
+            break;
+        case ProductorSleepBoardHS:
+            // SleepBoard模式不过滤
+            filterText = @"";
+            _currentFilterType = FilterTypeDeviceName;
+            break;
+        case ProductorEspBle:
+            // ESP模式使用文本框中的内容
+            filterText = _filterTextField.text;
+            // 过滤类型已经在segmentChanged时设置
+            break;
     }
     
     // 转换为小写进行不区分大小写的搜索
     filterText = [filterText lowercaseString];
     
-    // 过滤设备列表
-    NSMutableArray<DeviceInfo *> *filteredList = [NSMutableArray array];
-    for (DeviceInfo *device in _deviceList) {
-        if ([[device.deviceName lowercaseString] containsString:filterText] ||
-            [[device.deviceId lowercaseString] containsString:filterText] ||
-            (device.macAddress && [[device.macAddress lowercaseString] containsString:filterText])) {
-            [filteredList addObject:device];
+    // 根据过滤类型和文本从字典中提取设备
+    for (DeviceInfo *device in [_deviceDictionary allValues]) {
+        BOOL shouldInclude = YES;
+        
+        // 如果有过滤文本且不是SleepBoard模式，则应用过滤
+        if (filterText.length > 0 && _currentScanModule != ProductorSleepBoardHS) {
+            switch (_currentFilterType) {
+                case FilterTypeDeviceName:
+                    shouldInclude = device.deviceName && [[device.deviceName lowercaseString] containsString:filterText];
+                    break;
+                case FilterTypeMac:
+                    shouldInclude = device.macAddress && [[device.macAddress lowercaseString] containsString:filterText];
+                    break;
+                case FilterTypeUUID:
+                    shouldInclude = device.uuid && [[device.uuid lowercaseString] containsString:filterText];
+                    break;
+            }
+        }
+        
+        if (shouldInclude) {
+            [_deviceList addObject:device];
         }
     }
     
-    // 更新设备列表并刷新表格
-    _deviceList = filteredList;
+    // 按信号强度排序筛选后的设备
+    [_deviceList sortUsingComparator:^NSComparisonResult(DeviceInfo *obj1, DeviceInfo *obj2) {
+        return obj2.rssi - obj1.rssi;
+    }];
+    
+    // 刷新表格
     [_tableView reloadData];
 }
 
@@ -612,6 +943,35 @@
 }
 
 #pragma mark - 其他方法
+// CBCentralManagerDelegate 方法 检测bluetooth状态
+- (void)centralManagerDidUpdateState:(CBCentralManager *)central {
+    NSString *stateString;
+    switch (central.state) {
+        case CBManagerStatePoweredOn:
+            stateString = @"Powered ON";
+            break;
+        case CBManagerStatePoweredOff:
+            stateString = @"Powered OFF";
+            break;
+        case CBManagerStateUnauthorized:
+            stateString = @"Unauthorized";
+            break;
+        case CBManagerStateUnsupported:
+            stateString = @"Unsupported";
+            break;
+        case CBManagerStateResetting:
+            stateString = @"Resetting";
+            break;
+        case CBManagerStateUnknown:
+            stateString = @"Unknown";
+            break;
+        default:
+            stateString = @"Invalid State";
+            break;
+    }
+    
+    SCANLOG(@"CoreBluetooth state updated: %@", stateString);
+}
 
 - (void)segmentChanged:(UISegmentedControl *)sender {
     // 更新当前扫描模块

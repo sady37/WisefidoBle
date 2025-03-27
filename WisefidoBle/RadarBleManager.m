@@ -345,9 +345,12 @@
     DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:productorType
                                                            deviceName:deviceName
                                                              deviceId:deviceName.length > 0 ? deviceName : peripheral.identifier.UUIDString
-                                                            macAddress:@"unknown" // iOS中无法获取MAC地址
-                                                                uuid:peripheral.identifier.UUIDString
-                                                                rssi:-255];
+                                                           deviceType:@"Radar" // 设置为Radar类型
+                                                              version:nil     // 版本暂不设置
+                                                                  uid:nil     // UID暂不设置
+                                                          macAddress:@"unknown" // iOS中无法获取MAC地址
+                                                                 uuid:peripheral.identifier.UUIDString
+                                                                 rssi:-255];
     
     // 通知扫描回调
     if (_scanCallback) {

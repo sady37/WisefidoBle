@@ -21,7 +21,7 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 // 扫描视图控制器 - 负责显示扫描界面和处理设备选择
-@interface ScanViewController : UIViewController <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
+@interface ScanViewController : UIViewController <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate, CBCentralManagerDelegate>
 
 // 代理属性 - 用于设备选择回调
 @property (nonatomic, weak, nullable) id<ScanViewControllerDelegate> delegate;
@@ -30,7 +30,8 @@ NS_ASSUME_NONNULL_BEGIN
  * 初始化方法
  * @param centralManager 蓝牙中心管理器
  */
-- (instancetype)initWithCentralManager:(CBCentralManager *)centralManager;
+//- (instancetype)initWithCentralManager:(CBCentralManager *)centralManager;
+- (instancetype)init;
 
 /**
  * 开始扫描设备

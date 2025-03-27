@@ -50,7 +50,7 @@ typedef void(^SleepaceStatusCallback)(DeviceInfo * _Nonnull updatedDevice, BOOL 
  * 提供Sleepace设备的扫描、连接、配置和状态查询功能
  */
 //@interface SleepaceBleManager : NSObject
-@interface SleepaceBleManager : NSObject <CBCentralManagerDelegate>
+@interface SleepaceBleManager : NSObject <CBCentralManagerDelegate, CBPeripheralDelegate>
 #pragma mark - 初始化和单例方法
 
 /**
@@ -152,6 +152,7 @@ typedef void(^SleepaceStatusCallback)(DeviceInfo * _Nonnull updatedDevice, BOOL 
  */
 - (void)queryDeviceStatus:(DeviceInfo *)device
                completion:(SleepaceStatusCallback)completion;
+
 
 @end
 
