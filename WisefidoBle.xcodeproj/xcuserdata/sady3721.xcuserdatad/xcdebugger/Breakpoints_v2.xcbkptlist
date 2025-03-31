@@ -30,25 +30,9 @@
             filePath = "WisefidoBle/ScanViewController.m"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "185"
-            endingLineNumber = "185"
-            landmarkName = "-viewDidLoad"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "63386C25-5A2A-4CB5-B7AF-EAA3FE2120B4"
-            shouldBeEnabled = "Yes"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "WisefidoBle/ScanViewController.m"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "688"
-            endingLineNumber = "688"
-            landmarkName = "-startRssiScan"
+            startingLineNumber = "172"
+            endingLineNumber = "172"
+            landmarkName = "-init"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

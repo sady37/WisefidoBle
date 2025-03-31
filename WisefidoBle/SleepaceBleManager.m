@@ -3,6 +3,9 @@
 //
 
 #import "SleepaceBleManager.h"
+// 需要确保这些SDK相关的头文件被正确引入
+#import <BluetoothManager/BluetoothManager.h>  // 包含了SLPBLEManager等
+#import <BLEWifiConfig/BLEWifiConfig.h>        // WiFi配置相关
 
 
 
@@ -55,8 +58,9 @@
 - (void)connectionTimedOut;
 - (void)configurationTimedOut:(NSTimer *)timer;
 
-//- (DeviceInfo *)createDeviceInfoFromPeripheral:(CBPeripheral *)peripheral withName:(NSString *)name;
+- (DeviceInfo *)createDeviceInfoFromPeripheral:(CBPeripheral *)peripheral withName:(NSString *)name;
 - (NSString *)stringForTransferStatus:(SLPDataTransferStatus)status;
+- (NSString *)deviceTypeNameForCode:(SLPDeviceTypes)typeCode;
 
 - (void)invalidateScanTimer;
 - (void)invalidateConfigTimer;
@@ -87,7 +91,7 @@
         _bleWifiConfig = [SLPBleWifiConfig sharedBleWifiConfig];
         
          //Initialize direct CoreBluetooth manager
-        _cbManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
+        //_cbManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
         
 
         // Initialize status variables
@@ -132,9 +136,11 @@
 
 // SDK扫描方式
 - (void)startSDKScanWithTimeout:(NSTimeInterval)timeout {
+    _isScanning = YES;
     // 使用SDK方法进行扫描
     __weak typeof(self) weakSelf = self;
-    BOOL scanStarted = [_bleManager scanBluetoothWithTimeoutInterval:timeout*0.6 
+    NSTimeInterval scanTimeout = (timeout > 0) ? timeout : DEFAULT_SCAN_TIMEOUT;
+    BOOL scanStarted = [_bleManager scanBluetoothWithTimeoutInterval:scanTimeout
                                                   completion:^(SLPBLEScanReturnCodes code, 
                                                               NSInteger handleID, 
                                                               SLPPeripheralInfo *peripheralInfo) {
@@ -145,22 +151,31 @@
         if (code == SLPBLEScanReturnCode_Normal && peripheralInfo && peripheralInfo.peripheral) {
             // 获取设备信息
             CBPeripheral *peripheral = peripheralInfo.peripheral;
+            // ===== 在这里添加详细日志 =====
+            SLPLOG(@"device info:");
+            SLPLOG(@"Peripheral: %@", peripheral);
+            SLPLOG(@"Peripheral name: %@", peripheral.name ?: @"nil");  
+            SLPLOG(@"Peripheral ID: %@", peripheral.identifier);
+            SLPLOG(@"Peripheral state: %ld", (long)peripheral.state);
+            SLPLOG(@"PeripheralInfo name: %@", peripheralInfo.name ?: @"nil");
+
+            // =========================
+            // 获取服务UUID（从服务或硬编码）
             NSString *deviceName = peripheralInfo.name ?: @"Unknown"; //BM87224601903
             NSString *deviceType = peripheral.name ?: @"Unknown";  //bm8701-2-ble
-            NSString *uuid = peripheral.identifier.UUIDString;
-            SLPLOG(@"SDK scanresult - name: %@, deviceType:%@,UUID: %@", deviceName,deviceType,uuid);
-                        
+            NSString *identifierUUID = peripheral.identifier.UUIDString; //iOS自定的
+          
             // 创建设备信息对象
             DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:ProductorSleepBoardHS
                                                        deviceName:deviceName
-                                                         deviceId:uuid
+                                                         deviceId:deviceName
                                                        deviceType:deviceType  // 设置设备类型
                                                           version:nil        // 版本暂不设置
                                                               uid:nil        // UID暂不设置
                                                       macAddress:nil
-                                                             uuid:uuid
+                                                             uuid:identifierUUID
                                                              rssi:-255];     // 初始RSSI值
-           
+
             // 通知扫描回调
             if (strongSelf->_scanCallback) {
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -275,6 +290,7 @@
                                             uuid:@"error-uuid" // uuid变量可能未定义，所以用一个固定值替代
                                             rssi:-255];       // 初始RSSI值
 
+
                     self->_scanCallback(errorInfo);
                 }
             }
@@ -282,8 +298,6 @@
         return;
     }
 
-    // 设置扫描超时
-    NSTimeInterval scanTimeout = (timeout > 0) ? timeout : DEFAULT_SCAN_TIMEOUT;
 
     // 更新UI状态
     _isScanning = YES;
@@ -294,7 +308,6 @@
     [self startSDKScanWithTimeout:timeout];
  
 }
-
 - (void)stopScan {
     SLPLOG(@"stopScan called");
     
@@ -303,15 +316,23 @@
         return;
     }
    
-    // 使用 SDK 方法停止扫描
-    [_bleManager stopAllPeripheralScan];
-     // 同时停止iOS原生扫描
-    [_cbManager stopScan];
-     
-    // 重置扫描标志
+    // 标记扫描状态为已停止(提前设置标志，防止重复调用)
     _isScanning = NO;
     
-    SLPLOG(@"Scan stopped");
+    // 使用try-catch包装SDK调用，防止崩溃
+    @try {
+        // 使用 SDK 方法停止扫描
+        [_bleManager stopAllPeripheralScan];
+    } @catch (NSException *exception) {
+        SLPLOG(@"Exception while stopping SDK scan: %@", exception);
+        // 即使发生异常也继续执行
+    }
+    
+
+    // 清理资源(添加一个小延时以确保安全)
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        SLPLOG(@"Scan stopped");
+    });
 }
 
 //扫描回调设置
@@ -638,7 +659,49 @@
 }
 
 #pragma mark - Private Methods - Device Info Creation
+- (DeviceInfo *)createDeviceInfoFromPeripheral:(CBPeripheral *)peripheral withName:(NSString *)name {
+    NSString *deviceName = name ?: peripheral.name ?: @"Unknown";
+    NSString *uuid = peripheral.identifier.UUIDString;
+    NSString *deviceType = peripheral.name ?: @"Unknown";
+    
+    // 尝试获取设备类型
+    @try {
+        //SLPDeviceTypes deviceTypeCode = [_bleManager deviceTypeOfPeripheral:peripheral];
+        NSString *sdkDeviceName = [_bleManager deviceNameOfPeripheral:peripheral];
+        
+        if (sdkDeviceName && sdkDeviceName.length > 0) {
+            deviceType = sdkDeviceName;
+        }
+    } @catch (NSException *exception) {
+        SLPLOG(@"Exception getting device type: %@", exception.reason);
+    }
+    
+    // 创建设备信息对象
+    DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:ProductorSleepBoardHS
+                                                   deviceName:deviceName
+                                                     deviceId:uuid
+                                                   deviceType:deviceType
+                                                        version:nil
+                                                          uid:nil
+                                                  macAddress:nil
+                                                         uuid:uuid
+                                                         rssi:-255];
+    
+    return deviceInfo;
+}
 
+- (NSString *)deviceTypeNameForCode:(SLPDeviceTypes)typeCode {
+    // 根据设备类型代码返回可读的设备类型名称
+    switch (typeCode) {
+        case 0x01: // 假设这是BM8701_2的值，需要根据实际情况调整
+            return @"SleepBoard BM8701-2";
+        case 0x35: // 假设这是EW202W的值，需要根据实际情况调整
+            return @"EW202W";
+        // 其他设备类型...
+        default:
+            return [NSString stringWithFormat:@"Unknown Type (%ld)", (long)typeCode];
+    }
+}
 #pragma mark - Public Methods - connectDevice/Disconnect
 - (void)connectDevice:(DeviceInfo *)device {
     // 只记录设备信息，实际连接由SDK处理

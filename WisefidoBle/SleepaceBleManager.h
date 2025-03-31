@@ -9,6 +9,7 @@
 // Sleepace SDKs
 #import <BluetoothManager/BluetoothManager.h>
 #import <BLEWifiConfig/BLEWifiConfig.h>
+#import <SLPCommon/SLPCommon.h>
 
 NS_ASSUME_NONNULL_BEGIN
 

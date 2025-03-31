@@ -16,10 +16,10 @@ NSString * const kDefaultServerProtocol = @"tcp";
 
 - (instancetype)initWithProductorName:(Productor)productorName
                            deviceName:(NSString *)deviceName
-                             deviceId:(NSString *)deviceId
-                          deviceType:(NSString *)deviceType
-                             version:(NSString *)version
-                                 uid:(NSString *)uid
+                             deviceId:(nullable NSString *)deviceId
+                          deviceType:(nullable NSString *)deviceType
+                             version:(nullable NSString *)version
+                                 uid:(nullable NSString *)uid
                           macAddress:(nullable NSString *)macAddress
                                  uuid:(nullable NSString *)uuid
                                  rssi:(NSInteger)rssi {
@@ -28,9 +28,9 @@ NSString * const kDefaultServerProtocol = @"tcp";
         _productorName = productorName;
         _deviceName = [deviceName copy];
         _deviceId = [deviceId copy];
-        _deviceType = [deviceType copy];  // 新增 deviceType
-        _version = [version copy];        // 新增 version
-        _uid = [uid copy];                // 新增 uid
+        _deviceType = [deviceType copy];  
+        _version = [version copy];        
+        _uid = [uid copy];                
         _macAddress = [macAddress copy];
         _uuid = [uuid copy];
         

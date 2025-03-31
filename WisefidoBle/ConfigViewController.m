@@ -67,7 +67,9 @@
     [self setupViews];
     [self setupConstraints];
 
-    
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
+[self.view addGestureRecognizer:tap];
+
     // 更新UI以反映当前配置
     [self updateUIWithCurrentConfig];
 }
@@ -255,4 +257,7 @@
     return YES;
 }
 
+- (void)dismissKeyboard {
+    [self.view endEditing:YES];
+}
 @end

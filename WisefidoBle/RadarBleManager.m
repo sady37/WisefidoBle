@@ -182,24 +182,36 @@
         RDRLOG(@"Scan already in progress, ignoring request");
         return;
     }
-    
-    // 检查蓝牙状态
-    if (_centralManager.state != CBManagerStatePoweredOn) {
-        RDRLOG(@"Bluetooth not enabled, cannot start scan");
-        if (_errorCallback) {
-            _errorCallback(RadarBleErrorBluetoothDisabled, @"Bluetooth is disabled");
-        }
-        return;
-    }
-    
-    // 保存过滤参数
+        // 保存过滤参数
     _currentFilterPrefix = filterPrefix;
     _currentFilterType = filterType;
     
-    RDRLOG(@"Starting scan: timeout=%.1fs, filter=%@, type=%@", 
-           timeout, 
-           filterPrefix ?: @"None", 
-           filterType == FilterTypeDeviceName ? @"DeviceName" : (filterType == FilterTypeMac ? @"MAC" : @"UUID"));
+    // 检查蓝牙状态
+    if (_centralManager.state != CBManagerStatePoweredOn) {
+        RDRLOG(@"Bluetooth not enabled, delay rescan");
+        __weak typeof(self) weakSelf = self;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+                        if (!strongSelf) return;
+            if (strongSelf.centralManager.state == CBManagerStatePoweredOn) {
+                RDRLOG(@"after delay ble is ready,start  scan");
+                [strongSelf startActualScan:timeout];
+            } else {
+                if (strongSelf.errorCallback) {
+                    strongSelf.errorCallback(RadarBleErrorBluetoothDisabled, @"Bluetooth is disabled");
+                }
+            }
+        });
+        return;
+    }
+    
+    // 蓝牙已启用，直接开始扫描
+    [self startActualScan:timeout];
+}
+    
+// 实际开始扫描的内部方法
+- (void)startActualScan:(NSTimeInterval)timeout {
+    RDRLOG(@"Starting scan: timeout=%.1fs",timeout);
     
     // 设置扫描标志
     _isScanning = YES;
@@ -211,7 +223,7 @@
                                                 userInfo:nil
                                                  repeats:NO];
     
-    // 开始扫描，不使用过滤器参数，而是在回调中处理过滤
+    // 开始扫描，不使用过滤器参数，由scanviewcontroller处理过滤
     NSDictionary *options = @{CBCentralManagerScanOptionAllowDuplicatesKey: @NO};
     [_centralManager scanForPeripheralsWithServices:nil options:options];
 }
@@ -232,6 +244,7 @@
     _scanTimer = nil;
     
     _isScanning = NO;
+
 }
 
 // 扫描超时处理
@@ -280,77 +293,31 @@
  didDiscoverPeripheral:(CBPeripheral *)peripheral 
      advertisementData:(NSDictionary<NSString *,id> *)advertisementData 
                   RSSI:(NSNumber *)RSSI {
-    // 获取设备名称
-    NSString *deviceName = peripheral.name ?: 
-        advertisementData[CBAdvertisementDataLocalNameKey] ?: @"Unknown";
+        // ===== 在这里添加详细日志 =====
+        RDRLOG(@"设备信息:");
+        RDRLOG(@"Peripheral: %@", peripheral);
+        RDRLOG(@"Peripheral name: %@", peripheral.name ?: @"nil");
+        RDRLOG(@"Peripheral ID: %@", peripheral.identifier);
+        RDRLOG(@"Peripheral state: %ld", (long)peripheral.state);
+        RDRLOG(@"RSSI: %@", RSSI);
     
-    RDRLOG(@"Discovered device: %@ (UUID: %@, RSSI: %@)", deviceName, peripheral.identifier.UUIDString, RSSI);
-    
-    // 执行过滤
-    if (_currentFilterPrefix && _currentFilterPrefix.length > 0) {
-        BOOL matchFound = NO;
+        // =========================
         
-        switch (_currentFilterType) {
-            case FilterTypeDeviceName: {
-                // 设备名称过滤
-                if (deviceName && [deviceName containsString:_currentFilterPrefix]) {
-                    matchFound = YES;
-                }
-                break;
-            }
-                
-            case FilterTypeMac: {
-                // MAC地址过滤 (iOS中使用UUID字符串)
-                NSString *addressString = peripheral.identifier.UUIDString;
-                // 去除分隔符，与Android端保持一致
-                addressString = [addressString stringByReplacingOccurrencesOfString:@"-" withString:@""];
-                addressString = [addressString stringByReplacingOccurrencesOfString:@":" withString:@""];
-                addressString = [addressString stringByReplacingOccurrencesOfString:@"." withString:@""];
-                
-                if ([addressString containsString:_currentFilterPrefix]) {
-                    matchFound = YES;
-                }
-                break;
-            }
-                
-            case FilterTypeUUID: {
-                // 服务UUID过滤
-                NSArray *serviceUUIDs = advertisementData[CBAdvertisementDataServiceUUIDsKey];
-                if (serviceUUIDs) {
-                    for (CBUUID *uuid in serviceUUIDs) {
-                        if ([uuid.UUIDString containsString:_currentFilterPrefix]) {
-                            matchFound = YES;
-                            break;
-                        }
-                    }
-                }
-                break;
-            }
-        }
+        // 获取基本设备信息
+        NSString *deviceName = peripheral.name ?: @"Unknown";
+        NSString *deviceType = nil; // 固定设备类型
+        NSString *identifierUUID = peripheral.identifier.UUIDString; // iOS自定的,连接使用
         
-        // 如果不匹配过滤条件，跳过此设备
-        if (!matchFound) {
-            return;
-        }
-    }
-
-    Productor productorType = ProductorEspBle; // 默认为 ESP
-
-    // 根据设备名或广告数据分析设备类型
-    if ([deviceName hasPrefix:@"TSBLU"] || [deviceName containsString:@"Radar"]) {
-        productorType = ProductorRadarQL;
-    }
-    
-    // 创建DeviceInfo对象
-    DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:productorType
-                                                           deviceName:deviceName
-                                                             deviceId:deviceName.length > 0 ? deviceName : peripheral.identifier.UUIDString
-                                                           deviceType:@"Radar" // 设置为Radar类型
-                                                              version:nil     // 版本暂不设置
-                                                                  uid:nil     // UID暂不设置
-                                                          macAddress:@"unknown" // iOS中无法获取MAC地址
-                                                                 uuid:peripheral.identifier.UUIDString
-                                                                 rssi:-255];
+        // 创建设备信息对象
+        DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:ProductorRadarQL
+                                                                deviceName:deviceName
+                                                                deviceId:deviceName     // 使用设备名称作为ID
+                                                                deviceType:deviceType     // 设置设备类型
+                                                                version:nil            // 版本暂不设置
+                                                                    uid:nil // iOS标识符UUID存入uid
+                                                                macAddress:nil
+                                                                    uuid:identifierUUID    
+                                                                    rssi:[RSSI integerValue]]; // 使用扫描返回的RSSI
     
     // 通知扫描回调
     if (_scanCallback) {

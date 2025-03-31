@@ -19,10 +19,10 @@
 
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)connectionOptions API_AVAILABLE(ios(13.0)) {
     // Starting logs
-    NSLog(@"[SceneDelegate] Beginning execution of scene:willConnectToSession:options: method");
+   // NSLog(@"[SceneDelegate] Beginning execution of scene:willConnectToSession:options: method");
     
     // Only set window and rootViewController in iOS 13 and above
-    NSLog(@"[SceneDelegate] scene:willConnectToSession:options");
+    //NSLog(@"[SceneDelegate] scene:willConnectToSession:options");
     if ([scene isKindOfClass:[UIWindowScene class]]) {
         //NSLog(@"[SceneDelegate] Scene is UIWindowScene type");
         UIWindowScene *windowScene = (UIWindowScene *)scene;
@@ -44,13 +44,13 @@
         //NSLog(@"[SceneDelegate] rootViewController set successfully");
         
         [self.window makeKeyAndVisible];
-        NSLog(@"[SceneDelegate] makeKeyAndVisible completed");
+        //NSLog(@"[SceneDelegate] makeKeyAndVisible completed");
         
         // Set default text color for UILabel to system dynamic color
         [[UILabel appearance] setTextColor:[UIColor labelColor]];
         //NSLog(@"[SceneDelegate] Default UILabel color set");
     } else {
-        NSLog(@"[SceneDelegate] Error: Scene is not UIWindowScene type");
+        //NSLog(@"[SceneDelegate] Error: Scene is not UIWindowScene type");
     }
     NSLog(@"[SceneDelegate] Completed execution of scene:willConnectToSession:options: method");
 }

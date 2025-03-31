@@ -30,12 +30,12 @@ typedef NS_ENUM(NSInteger, FilterType) {
 // 基本设备信息
 @property (nonatomic, assign) Productor productorName;      // 设备生产商
 @property (nonatomic, copy) NSString *deviceName;           // 设备名称
-@property (nonatomic, copy) NSString *deviceId;             // 设备ID
+@property (nonatomic, copy) NSString *deviceId;             // 设备ID //硬件服务UUID,
 @property (nonatomic, copy, nullable) NSString *deviceType;  // 设备类型（可为nil）
 @property (nonatomic, copy, nullable) NSString *version;    // 设备版本（可为nil）
-@property (nonatomic, copy, nullable) NSString *uid;        // 设备UID（可为nil）
+@property (nonatomic, copy, nullable) NSString *uid;        // iOS分配UUID（可为nil）/设备标识符UUID，由iOS的CoreBluetooth框架分配，对于同一设备，不同的iOS设备会分配不同的标识符UUID
 @property (nonatomic, copy, nullable) NSString *macAddress; // MAC地址（可为nil）
-@property (nonatomic, copy, nullable) NSString *uuid;       // iOS设备UUID（可为nil）
+@property (nonatomic, copy, nullable) NSString *uuid;       // 设备UUID（可为nil）//硬件服务UUID,
 @property (nonatomic, assign) NSInteger rssi;               // 信号强度（-255表示不可用）
 
 // WiFi状态属性
@@ -59,10 +59,10 @@ typedef NS_ENUM(NSInteger, FilterType) {
 // 保留原有方法
 - (instancetype)initWithProductorName:(Productor)productorName
                            deviceName:(NSString *)deviceName
-                             deviceId:(NSString *)deviceId
-                            deviceType:(NSString *)deviceType   
-                               version:(NSString *)version
-                                   uid:(NSString *)uid
+                             deviceId:(nullable NSString *)deviceId
+                            deviceType:(nullable NSString *)deviceType   
+                               version:(nullable NSString *)version
+                                   uid:(nullable NSString *)uid
                            macAddress:(nullable NSString *)macAddress
                                 uuid:(nullable NSString *)uuid
                                 rssi:(NSInteger)rssi;

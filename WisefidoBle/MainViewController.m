@@ -88,6 +88,8 @@
     [self setupConstraints];
     [self setupActions];
     
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
+[self.view addGestureRecognizer:tap];
        
     // 加载最近配置
     [self loadRecentConfigs];
@@ -95,6 +97,8 @@
     // 设置默认值
     self.serverAddressTextField.text = @"app.wisefido.com";
     self.serverPortTextField.text = @"1060";
+  
+
 }
 
 
@@ -321,7 +325,7 @@
         
         [_deviceRssiLabel.trailingAnchor constraintEqualToAnchor:_deviceInfoView.trailingAnchor constant:-16],
         [_deviceRssiLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
-        [_deviceRssiLabel.widthAnchor constraintEqualToConstant:50]
+        [_deviceRssiLabel.widthAnchor constraintEqualToConstant:70]
     ]];
     
     // 配置标题约束
@@ -352,7 +356,9 @@
 	    [_serverPortTextField.heightAnchor constraintEqualToConstant:44],
 	    
 	    // 关键修改：设置6:4的宽度比例（移除硬编码的widthAnchor约束）
-	    [_serverAddressTextField.widthAnchor constraintEqualToAnchor:self.serverPortTextField.widthAnchor multiplier:6.0/4.0]
+	    //[_serverAddressTextField.widthAnchor constraintEqualToAnchor:self.serverPortTextField.widthAnchor multiplier:6.0/4.0]
+            [_serverAddressTextField.widthAnchor constraintEqualToAnchor:self.serverPortTextField.widthAnchor multiplier:1.5] // 6.0/4.0=1.5
+        
 	]];
     
     // 历史容器约束
@@ -396,7 +402,13 @@
     [_wifiPasswordTextField.heightAnchor constraintEqualToConstant:44],
     
     // 关键修改：设置6:4的宽度比例
-    [_wifiNameTextField.widthAnchor constraintEqualToAnchor:self.wifiPasswordTextField.widthAnchor multiplier:6.0/4.0]
+    //[_wifiNameTextField.widthAnchor constraintEqualToAnchor:self.wifiPasswordTextField.widthAnchor multiplier:6.0/4.0]
+        [_wifiNameTextField.widthAnchor constraintEqualToAnchor:_wifiPasswordTextField.widthAnchor], // 1:1基础比例
+    
+    
+    // 最小宽度保护（新增）
+    [_wifiNameTextField.widthAnchor constraintGreaterThanOrEqualToConstant:120],
+    [_wifiPasswordTextField.widthAnchor constraintGreaterThanOrEqualToConstant:100]
 ]];
     
     // 状态输出区域约束
@@ -408,14 +420,6 @@
     ]];
 }
 
-/*- (void)setupActions {
-    [_pairButton addTarget:self action:@selector(handlePairButton) forControlEvents:UIControlEventTouchUpInside];
-    [_statusButton addTarget:self action:@selector(handleStatusButton) forControlEvents:UIControlEventTouchUpInside];
-    [_searchButton addTarget:self action:@selector(handleSearchButton) forControlEvents:UIControlEventTouchUpInside];
-    [_recentServerButton addTarget:self action:@selector(showServerHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
-    [_recentWifiButton addTarget:self action:@selector(showWifiHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
-}
-*/
 - (void)setupActions {
     [self.pairButton addTarget:self action:@selector(handlePairButton:) forControlEvents:UIControlEventTouchUpInside];
     [self.statusButton addTarget:self action:@selector(handleStatusButton:) forControlEvents:UIControlEventTouchUpInside];
@@ -559,7 +563,7 @@
     self.deviceIdLabel.text = deviceInfo.deviceId ? [NSString stringWithFormat:@"ID: %@", deviceInfo.deviceId] : @"ID: Unknown";
     self.deviceRssiLabel.text = [NSString stringWithFormat:@"RSSI: %ld dBm", (long)deviceInfo.rssi];
 }
-//#pragma mark - 设置按钮处理KK
+//#pragma mark - 设置按钮处理
 
 - (void)showServerHistoryMenu:(id)sender  {
 		    MAINLOG(@"点击了 recentServer 按钮!!!");
@@ -1048,7 +1052,9 @@
     
 }
 
-
+- (void)dismissKeyboard {
+    [self.view endEditing:YES];
+}
 
 @end
 

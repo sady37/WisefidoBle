@@ -68,3 +68,65 @@ peripheralInfo.name 可能是 SDK（如 SleepaceBleManager）额外存储的名�
 deviceInfo.deviceName = peripheralInfo.name
 deviceInfo.sleepaceDeviceType = peripheral.name
 
+sleepaceBelManager.h/m  查询deviceType:
+.h 
+// Sleepace SDKs
+#import <BluetoothManager/BluetoothManager.h>
+#import <BLEWifiConfig/BLEWifiConfig.h>
+#import <SLPCommon/SLPCommon.h>
+.m
+interface ....
+- (DeviceInfo *)createDeviceInfoFromPeripheral:(CBPeripheral *)peripheral withName:(NSString *)name;
+- (NSString *)stringForTransferStatus:(SLPDataTransferStatus)status;
+- (NSString *)deviceTypeNameForCode:(SLPDeviceTypes)typeCode;
+
+            // 添加设备类型获取的代码
+            @try {
+                // 使用SDK方法获取设备类型代码
+                SLPDeviceTypes deviceTypeCode = [_bleManager deviceTypeOfPeripheral:peripheral];
+                SLPLOG(@"Device type code: %ld", (long)deviceTypeCode);
+                
+                // 使用SDK方法获取设备名称
+                NSString *sdkDeviceName = [_bleManager deviceNameOfPeripheral:peripheral];
+                SLPLOG(@"SDK device name: %@", sdkDeviceName ?: @"nil");
+                
+                    // 获取设备材质/型号
+                NSInteger deviceTexture = [_bleManager deviceTextureOfPeripheral:peripheral];
+                SLPLOG(@"Device texture: %ld", (long)deviceTexture);
+                // 只有当SDK返回有效的设备名称时才使用它
+                if (sdkDeviceName && sdkDeviceName.length > 0) {
+                    deviceType = sdkDeviceName;
+                    SLPLOG(@"Using SDK device name as type: %@", deviceType);
+                } else if (deviceTypeCode != 0) {
+                    // 如果没有设备名称但有类型代码，可以映射到一个可读的名称
+                    NSString *mappedType = [self deviceTypeNameForCode:deviceTypeCode];
+                    if (mappedType) {
+                        deviceType = mappedType;
+                        SLPLOG(@"Mapped device type code to name: %@", deviceType);
+                    }
+                }
+            } @catch (NSException *exception) {
+                SLPLOG(@"Exception getting device type: %@", exception.reason);
+            }
+            
+
+服务UUID：
+
+是硬件设备的固有特性
+对同一类型的设备来说是相同的
+不同手机扫描同一设备时，获取到的服务UUID是一致的
+可以用于识别设备类型
+
+
+设备标识符UUID：
+
+由iOS的CoreBluetooth框架分配
+对于同一设备，不同的iOS设备会分配不同的标识符UUID
+主要用于特定iOS设备上跟踪已发现的蓝牙设备
+
+
+
+您提出的解决方案非常恰当：
+
+将服务UUID存储在DeviceInfo的uuid字段中
+将设备标识符UUID存储在DeviceInfo的uid字段中
