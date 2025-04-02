@@ -61,32 +61,33 @@ static const NSInteger kMaxConfigCount = 5;
         return;
     }
 
-    // 获取当前保存的WiFi配置列表
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSMutableArray *wifiConfigs = [[defaults objectForKey:@"WiFiConfigs"] mutableCopy];
-    if (!wifiConfigs) {
-        wifiConfigs = [NSMutableArray array];
-    }
-
-    // 创建新的WiFi配置字典
-    NSDictionary *wifiConfig = @{
+    // 使用统一的 loadArrayForKey: 方法加载数据
+    NSMutableArray *wifiConfigs = [self loadArrayForKey:kWiFiConfigsKey];
+    
+    // 创建新的配置字典
+    NSDictionary *newConfig = @{
         @"ssid": wifiSsid,
         @"password": wifiPassword ?: @""
     };
 
-    // 检查是否已存在相同的SSID配置，存在则替换
-    NSUInteger existingIndex = [wifiConfigs indexOfObjectPassingTest:^BOOL(NSDictionary *config, NSUInteger idx, BOOL *stop) {
-        return [config[@"ssid"] isEqualToString:wifiSsid];
-    }];
-    if (existingIndex != NSNotFound) {
-        [wifiConfigs replaceObjectAtIndex:existingIndex withObject:wifiConfig];
-    } else {
-        [wifiConfigs addObject:wifiConfig];
+    // 移除所有同名的旧配置
+    [wifiConfigs filterUsingPredicate:
+        [NSPredicate predicateWithBlock:^BOOL(NSDictionary *config, NSDictionary *bindings) {
+            return ![config[@"ssid"] isEqualToString:wifiSsid];
+        }]];
+
+    // 插入到数组开头
+    [wifiConfigs insertObject:newConfig atIndex:0];
+
+    // 限制最大数量
+    if (wifiConfigs.count > kMaxConfigCount) {
+        [wifiConfigs removeLastObject];
     }
 
-    // 保存更新后的配置列表
-    [defaults setObject:wifiConfigs forKey:@"WiFiConfigs"];
-    [defaults synchronize];
+    // 使用统一的 saveArray:forKey: 方法保存 ✅ 修复了键名问题
+    [self saveArray:wifiConfigs forKey:kWiFiConfigsKey];
+    
+    NSLog(@"✅ Saved WiFi config: %@ (Count: %lu)", wifiSsid, (unsigned long)wifiConfigs.count);
 }
 - (NSArray<NSDictionary<NSString *, NSString *> *> *)getWiFiConfigs {
     return [self loadArrayForKey:kWiFiConfigsKey] ?: @[];
@@ -136,10 +137,18 @@ static const NSInteger kMaxConfigCount = 5;
     NSMutableArray *array = nil;
     
     if (@available(iOS 12.0, *)) {
-        // iOS 12+使用新API
-        array = [NSKeyedUnarchiver unarchivedObjectOfClass:[NSMutableArray class] fromData:data error:&error];
+        // 显式允许所有可能的数据类型
+        NSSet *allowedClasses = [NSSet setWithObjects:
+                                [NSMutableArray class],
+                                [NSDictionary class],
+                                [NSString class],
+                                [NSNumber class],
+                                nil];
+        array = [NSKeyedUnarchiver unarchivedObjectOfClasses:allowedClasses 
+                                                   fromData:data 
+                                                      error:&error];
     } else {
-        // iOS 12以下继续使用旧API
+        // iOS 11 及以下保持原逻辑
         #pragma clang diagnostic push
         #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         array = [NSKeyedUnarchiver unarchiveObjectWithData:data];
@@ -147,11 +156,12 @@ static const NSInteger kMaxConfigCount = 5;
     }
     
     if (error) {
-        NSLog(@"Error unarchiving array: %@", error);
+        NSLog(@"Error unarchiving array (key: %@): %@", key, error);
         return [NSMutableArray array];
     }
     
-    return array ?: [NSMutableArray array];
+    // 类型安全校验
+    return ([array isKindOfClass:[NSMutableArray class]]) ? array : [NSMutableArray array];
 }
 
 @end

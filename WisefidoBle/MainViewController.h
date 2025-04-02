@@ -10,6 +10,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// 添加 typedef 定义
+typedef void(^MainConfigCallback)(BOOL success, NSDictionary *result);
+
 // 主视图控制器 - 负责展示和管理雷达设备的配置和扫描
 @interface MainViewController : UIViewController <ScanViewControllerDelegate, UITextFieldDelegate, CBCentralManagerDelegate>
 
@@ -36,8 +39,18 @@ NS_ASSUME_NONNULL_BEGIN
  * 更新设备信息
  * @param deviceInfo 包含设备信息的对象，包括设备名称、设备 ID 和信号强度
  */
- - (void)updateDeviceInfo:(DeviceInfo *)deviceInfo;
+ - (void)updateDeviceInfo:(nullable DeviceInfo *)deviceInfo;
 
+
+// 方法声明
+- (void)configureDevice:(DeviceInfo *)device
+          serverAddress:(nullable NSString *)serverAddress
+            serverPort:(NSInteger)serverPort
+         serverProtocol:(nullable NSString *)serverProtocol
+               wifiSsid:(nullable NSString *)wifiSsid
+           wifiPassword:(nullable NSString *)wifiPassword
+             completion:(nullable MainConfigCallback)completion;
+ 
 @end
 
 NS_ASSUME_NONNULL_END

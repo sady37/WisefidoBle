@@ -52,6 +52,8 @@ typedef void(^SleepaceStatusCallback)(DeviceInfo * _Nonnull updatedDevice, BOOL 
  */
 //@interface SleepaceBleManager : NSObject
 @interface SleepaceBleManager : NSObject <CBCentralManagerDelegate, CBPeripheralDelegate>
+
+
 #pragma mark - 初始化和单例方法
 
 /**
@@ -92,10 +94,17 @@ typedef void(^SleepaceStatusCallback)(DeviceInfo * _Nonnull updatedDevice, BOOL 
                filterPrefix:(nullable NSString *)filterPrefix
                  filterType:(FilterType)filterType;
 
+
+/**
+ * 保存扫描到的设备peripheral，供查询、配置使用
+ */
+ - (void)setCurrentDevice:(DeviceInfo *)device;
+
 /**
  * 停止扫描设备
  */
 - (void)stopScan;
+
 
 #pragma mark - 设备连接方法
 

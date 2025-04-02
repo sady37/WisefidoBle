@@ -15,7 +15,7 @@
 #define SCANLOG(fmt, ...) NSLog((@"[ScanViewController] " fmt), ##__VA_ARGS__)
 // 扫描超时常量定义
 #define RADAR_SCAN_TIMEOUT     6.0  // 雷达设备扫描超时时间（秒）
-#define SLEEPACE_SCAN_TIMEOUT  4.0  // Sleepace设备扫描超时时间（秒）
+#define SLEEPACE_SCAN_TIMEOUT  4.0  // Radar设备扫描超时时间（秒）
 #define RSSI_SCAN_TIMEOUT      6.0  // RSSI扫描超时时间（秒）
 
 #pragma mark - DeviceTableViewCell 声明
@@ -54,7 +54,6 @@
 @property (nonatomic, assign) FilterType currentFilterType;
 @property (nonatomic, copy) NSString *currentFilterPrefix;
 @property (nonatomic, strong) CBCentralManager *cbManager;// iOS 蓝牙管理器用于RSSI更新
-@property (nonatomic, strong) NSMutableDictionary<NSString *, DeviceInfo *> *deviceDictionary; // 使用 UUID 作为键进行去重
 @property (nonatomic, assign) BOOL isRssiScanning; // 标记是否正在进行RSSI扫描
 @property (nonatomic, strong) NSTimer *radarScanTimer; // Radar扫描定时器
 @property (nonatomic, strong) NSTimer *sleepaceScanTimer; // Sleepace扫描定时器
@@ -167,7 +166,6 @@
     self = [super init];
     if (self) {
         _deviceList = [NSMutableArray array];
-        _deviceDictionary = [NSMutableDictionary dictionary]; // 初始化设备字典,去重
         _configStorage = [[ConfigStorage alloc] init];
         _currentScanModule = ProductorRadarQL; // 默认使用雷达模块
         _isScanning = NO;
@@ -210,6 +208,16 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     // 视图即将出现时可以添加额外逻辑
+          // 确保状态正确初始化
+      _isScanning = NO;
+      [self updateScanButtonState];
+
+      // 强制重置 SleepaceBleManager 的状态
+      if (_currentScanModule == ProductorSleepBoardHS) {
+          SleepaceBleManager *manager = [SleepaceBleManager getInstance:self];
+          // 调用一个简单的方法来确保状态重置
+          [manager stopScan];
+      }
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -246,7 +254,6 @@
     _cbManager = nil;
     
     _deviceList = nil;
-    _deviceDictionary = nil;
     _configStorage = nil;
 }
 
@@ -466,7 +473,6 @@
     
     // 清空设备列表
     [_deviceList removeAllObjects];
-    [_deviceDictionary removeAllObjects];
     [_tableView reloadData];
     
 
@@ -503,7 +509,7 @@
         SCANLOG(@"Received device: %@, deviceType:%@, UUID: %@", deviceInfo.deviceName,deviceInfo.deviceType,deviceInfo.uuid);
         
         // 阶段1：去重检查
-        if (![self checkAndStoreInDictionary:deviceInfo]) return;
+        //if (![self checkAndStoreInDictionary:deviceInfo]) return;
         
         // 阶段2：过滤判断
         if (![self filterDevice:deviceInfo]) return;
@@ -572,7 +578,7 @@
         SCANLOG(@"Received Sleep device: %@, deviceType:%@, UUID: %@", deviceInfo.deviceName, deviceInfo.deviceType,deviceInfo.uuid);
         
         // 阶段1：去重检查
-        if (![self checkAndStoreInDictionary:deviceInfo]) return;
+        //if (![self checkAndStoreInDictionary:deviceInfo]) return;
         
         // 阶段2：过滤判断
         if (![self filterDevice:deviceInfo]) return;
@@ -833,8 +839,44 @@
     
     // 获取选中的设备
     DeviceInfo *device = _deviceList[indexPath.row];
-    NSLog(@"设备已选中: %@", device.deviceName);
-    
+        // 根据设备类型处理选取逻辑
+    switch (device.productorName) {
+        case ProductorSleepBoardHS: {
+            // Sleepace设备处理
+            //[[SleepaceBleManager getInstance:self] setCurrentDevice:device];
+            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                [[SleepaceBleManager getInstance:self] setCurrentDevice:device];
+            });
+            //SCANLOG(@"Sleepace device selected: %@", device.deviceName);
+            break;
+        }
+            
+        case ProductorRadarQL: {
+            // Radar设备处理
+            //[[RadarBleManager sharedManager] setCurrentDevice:device];
+            //SCANLOG(@"Radar device selected: %@", device.deviceName);
+            break;
+        }
+            
+        case ProductorEspBle: {
+            // ESP设备处理
+            //[[RadarBleManager sharedManager] setCurrentDevice:device];
+            //SCANLOG(@"ESP device selected: %@", device.deviceName);
+            break;
+        }
+            
+        default:
+            //SCANLOG(@"Unknown device type: %@", device.deviceName);
+            break;
+    }
+    /*
+    // 针对Sleepace设备，传递设备信息到对应的管理器
+    if (device.productorName == ProductorSleepBoardHS) {
+        // 获取SleepaceBleManager实例并传入设备信息
+        [[SleepaceBleManager getInstance:self] setCurrentDevice:device];        
+        SCANLOG(@"Connected Sleepace device: %@", device.deviceName);
+    }*/ 
+
     // 停止扫描
     [self stopScan];
     
@@ -859,32 +901,9 @@
 
 
 #pragma mark - UITextFieldDelegate
-/*
-- (BOOL)textField:(UITextField *)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString *)string {
-    // 延迟更新过滤列表，以便用户输入完成
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [self filterDevices];
-    });
-    return YES;
-}
 
-- (BOOL)textFieldShouldReturn:(UITextField *)textField {
-    [textField resignFirstResponder];
-    [self filterDevices];
-    return YES;
-}*/
 
 #pragma mark - 设备过滤 
-- (BOOL)checkAndStoreInDictionary:(DeviceInfo *)device {
-    @synchronized (self) {
-        if (!device.uuid || self.deviceDictionary[device.uuid]) {
-            return NO; // 无效设备或已存在
-        }
-        self.deviceDictionary[device.uuid] = device;
-        return YES;
-    }
-}
-
 - (BOOL)filterDevice:(DeviceInfo *)device {
     // 1. 获取当前过滤条件
     NSString *filterText = [self getCurrentFilterText];
@@ -1077,10 +1096,18 @@
     }
 }
 
-- (void)dismissViewController {
-    [self stopScan];
-    [self.navigationController dismissViewControllerAnimated:YES completion:nil];
-}
+  - (void)dismissViewController {
+      // 先停止所有扫描和清理资源（在后台线程执行）
+      dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+          // 停止扫描
+          [self stopScan];
+
+          // 在主线程关闭视图
+          dispatch_async(dispatch_get_main_queue(), ^{
+              [self dismissViewControllerAnimated:YES completion:nil];
+          });
+      });
+  }
 
     - (void)dismissKeyboard {
     [self.view endEditing:YES];}

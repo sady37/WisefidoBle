@@ -52,7 +52,8 @@ typedef void(^RadarStatusCallback)(DeviceInfo * _Nonnull updatedDevice, BOOL suc
  * Radar蓝牙管理器
  * 提供Radar设备的扫描、连接、配置和状态查询功能
  */
-@interface RadarBleManager : NSObject
+
+@interface RadarBleManager : NSObject <CBCentralManagerDelegate, CBPeripheralDelegate, BlufiDelegate>
 
 /**
  * 获取单例实例
@@ -87,33 +88,9 @@ typedef void(^RadarStatusCallback)(DeviceInfo * _Nonnull updatedDevice, BOOL suc
 - (void)stopScan;
 
 /**
- * 配置设备WiFi，使用默认超时时间
- * @param device 设备信息，必须包含有效的id
- * @param wifiSsid WiFi SSID
- * @param wifiPassword WiFi密码
- * @param completion 配置结果回调
+ * 保存扫描到的设备peripheral，供查询、配置使用
  */
-- (void)configureWiFi:(DeviceInfo *)device
-             wifiSsid:(NSString *)wifiSsid
-         wifiPassword:(nullable NSString *)wifiPassword
-           completion:(RadarConfigCallback)completion;
-
-
-
-/**
- * 配置设备服务器，使用默认超时时间
- * @param device 设备信息，必须包含有效的id
- * @param serverAddress 服务器地址
- * @param serverPort 服务器端口
- * @param serverProtocol 服务器协议
- * @param completion 配置结果回调
- */
-- (void)configureServer:(DeviceInfo *)device
-          serverAddress:(NSString *)serverAddress
-            serverPort:(NSInteger)serverPort
-         serverProtocol:(nullable NSString *)serverProtocol
-             completion:(RadarConfigCallback)completion;
-
+ - (void)setCurrentDevice:(DeviceInfo *)device;
 
 /**
  * 配置设备WiFi和服务器，使用默认超时时间

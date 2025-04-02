@@ -313,19 +313,23 @@
         [_deviceInfoView.heightAnchor constraintEqualToConstant:60]
     ]];
     
+
     // 设备ID和名称标签约束
     [NSLayoutConstraint activateConstraints:@[
-        [_deviceIdLabel.leadingAnchor constraintEqualToAnchor:_deviceInfoView.leadingAnchor constant:16],
-        [_deviceIdLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
-        [_deviceIdLabel.widthAnchor constraintEqualToConstant:120],
-        
-        [_deviceNameLabel.leadingAnchor constraintEqualToAnchor:_deviceIdLabel.trailingAnchor constant:16],
-        [_deviceNameLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
-        [_deviceNameLabel.trailingAnchor constraintEqualToAnchor:self.deviceRssiLabel.leadingAnchor constant:-16],
-        
+        // 设置对齐和边距
+        [_deviceNameLabel.leadingAnchor constraintEqualToAnchor:_deviceInfoView.leadingAnchor constant:16],
+        [_deviceNameLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],        
+        [_deviceIdLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],        
         [_deviceRssiLabel.trailingAnchor constraintEqualToAnchor:_deviceInfoView.trailingAnchor constant:-16],
         [_deviceRssiLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
-        [_deviceRssiLabel.widthAnchor constraintEqualToConstant:70]
+        
+        // 按5/3/2比例分配空间
+        [_deviceNameLabel.widthAnchor constraintEqualToAnchor:_deviceInfoView.widthAnchor multiplier:0.5],
+        [_deviceRssiLabel.widthAnchor constraintEqualToAnchor:_deviceInfoView.widthAnchor multiplier:0.2],
+        
+        // 设置元素之间的连接关系
+        [_deviceIdLabel.leadingAnchor constraintEqualToAnchor:_deviceNameLabel.trailingAnchor],
+        [_deviceRssiLabel.leadingAnchor constraintEqualToAnchor:_deviceIdLabel.trailingAnchor],
     ]];
     
     // 配置标题约束
@@ -451,63 +455,42 @@
 }
 
 #pragma mark - 按钮处理
-
-- (void)handlePairButton:(id)sender  {
-    MAINLOG(@"点击了 Pair 按钮!!!");
-	// 检查设备选择
+- (void)handlePairButton:(id)sender {
+    // 检查设备选择
     if (!self.selectedDevice) {
         [self showMessage:@"Please select a device first"];
         return;
     }
  
-    // 检验服务器配置
-    NSString *serverAddress = nil;
-    NSString *serverProtocol = nil;
-    NSInteger serverPort = 0;
-	BOOL hasValidServer = [self validateServerConfigWithAddress:&serverAddress port:&serverPort protocol:&serverProtocol];
+    // 获取配置参数
+    NSString *serverAddress = self.serverAddressTextField.text;
+    NSInteger serverPort = [self.serverPortTextField.text integerValue];
+    NSString *serverProtocol = @"tcp"; // 默认协议
+    NSString *wifiSsid = self.wifiNameTextField.text;
+    NSString *wifiPassword = self.wifiPasswordTextField.text;
     
-    // 检验WiFi配置
-    NSString *wifiSsid = nil;
-    NSString *wifiPassword = nil;
-    BOOL hasValidWifi = [self validateWifiConfigWithSSID:&wifiSsid password:&wifiPassword];
-    
-    // 如果是 Sleepace 且没有有效的 WiFi 配置，提示用户输入 WiFi 信息
-    if (self.selectedDevice.productorName == ProductorSleepBoardHS && !hasValidWifi) {
-        [self showMessage:@"SleepBoard devices require WiFi configuration. Please enter valid WiFi information."];
+    // 验证参数
+    if (self.selectedDevice.productorName == ProductorSleepBoardHS && !wifiSsid.length) {
+        [self showMessage:@"SleepBoard devices require WiFi configuration"];
         return;
     }
-
-    // 保存 WiFi 配置历史
-    if (hasValidWifi) {
+    
+    // 保存配置历史
+    if (wifiSsid.length) {
         [self.configStorage saveWiFiConfigWithSsid:wifiSsid password:wifiPassword];
     }
-
-    // 保存服务器配置历史
-    if (hasValidServer) {
+    if (serverAddress.length && serverPort > 0) {
         [self.configStorage saveServerConfig:serverAddress port:serverPort protocol:serverProtocol];
     }
     
-    // 根据设备类型进行不同的配网操作
-    switch (self.selectedDevice.productorName) {
-        case ProductorRadarQL:
-        case ProductorEspBle:
-            // 使用RadarBleManager配网
-            [self configureRadarDeviceWithWifiSsid:wifiSsid
-                                     wifiPassword:wifiPassword
-                                    serverAddress:hasValidServer ? serverAddress : nil
-                                       serverPort:hasValidServer ? serverPort : 0
-                                   serverProtocol:hasValidServer ? serverProtocol : nil];
-            break;
-            
-        case ProductorSleepBoardHS:
-            // 使用SleepaceBleManager配网
-            [self configureSleepaceDeviceWithWifiSsid:wifiSsid
-                                        wifiPassword:wifiPassword
-                                       serverAddress:hasValidServer ? serverAddress : nil
-                                          serverPort:hasValidServer ? serverPort : 0
-                                      serverProtocol:hasValidServer ? serverProtocol : nil];
-            break;
-    }
+    // 执行设备配置
+    [self configureDevice:self.selectedDevice
+            serverAddress:serverAddress.length ? serverAddress : nil
+              serverPort:serverPort > 0 ? serverPort : 0
+           serverProtocol:serverProtocol
+                 wifiSsid:wifiSsid.length ? wifiSsid : nil
+             wifiPassword:wifiPassword
+               completion:nil]; // 这里不需要额外的回调，因为方法内部已经处理了UI更新
 }
 
 - (void)handleStatusButton:(id)sender  {
@@ -535,7 +518,29 @@
 //#pragma mark - 扫描设备	
 - (void)handleSearchButton:(id)sender {
     MAINLOG(@"Search button tapped!");
-    
+    // 清理资源：断开当前设备连接
+    if (self.selectedDevice != nil) {
+        // 根据设备类型断开连接
+        switch (self.selectedDevice.productorName) {
+            case ProductorSleepBoardHS:
+                [[SleepaceBleManager getInstance:self] disconnect];
+                break;
+                
+            case ProductorRadarQL:
+            case ProductorEspBle:
+                [[RadarBleManager sharedManager] disconnect];
+                break;
+                
+            default:
+                MAINLOG(@"Unknown device type to disconnect");
+                break;
+        }
+        
+    // 置空当前设备
+    self.selectedDevice = nil;
+    [self updateDeviceInfo:nil];
+    }
+
     // 创建ScanViewController
     ScanViewController *scanVC = [[ScanViewController alloc] init]; // 使用新的初始化方法
     scanVC.delegate = self;
@@ -549,7 +554,7 @@
 }
 
 //#pragma mark - 更新设备信息
-- (void)updateDeviceInfo:(DeviceInfo *)deviceInfo {
+- (void)updateDeviceInfo:(nullable DeviceInfo *)deviceInfo {
     if (!deviceInfo) {
         // 如果 deviceInfo 为空，显示默认值
         self.deviceNameLabel.text = @"No Device";
@@ -557,16 +562,20 @@
         self.deviceRssiLabel.text = @"--";
         return;
     }
-    
+    // 获取设备ID的最后4位
+    NSString *displayId = deviceInfo.deviceId.length > 4 ? 
+        [deviceInfo.deviceId substringFromIndex:deviceInfo.deviceId.length - 4] : 
+        deviceInfo.deviceId;
+
     // 更新设备信息
     self.deviceNameLabel.text = deviceInfo.deviceName ? [NSString stringWithFormat:@"Name: %@", deviceInfo.deviceName] : @"Name: Unknown";
-    self.deviceIdLabel.text = deviceInfo.deviceId ? [NSString stringWithFormat:@"ID: %@", deviceInfo.deviceId] : @"ID: Unknown";
+    self.deviceIdLabel.text = [NSString stringWithFormat:@"%@", displayId];
     self.deviceRssiLabel.text = [NSString stringWithFormat:@"RSSI: %ld dBm", (long)deviceInfo.rssi];
 }
 //#pragma mark - 设置按钮处理
 
 - (void)showServerHistoryMenu:(id)sender  {
-		    MAINLOG(@"点击了 recentServer 按钮!!!");
+		    //MAINLOG(@"click  recentServer button!!!");
     NSArray<NSDictionary *> *recentServers = [self.configStorage getServerConfigs];
     if (recentServers.count == 0) {
         [self showMessage:@"No recent servers available"];
@@ -736,7 +745,72 @@
 }
 
 #pragma mark - 设备操作
-
+- (void)configureDevice:(DeviceInfo *)device
+          serverAddress:(nullable NSString *)serverAddress
+            serverPort:(NSInteger)serverPort
+         serverProtocol:(nullable NSString *)serverProtocol
+               wifiSsid:(nullable NSString *)wifiSsid
+           wifiPassword:(nullable NSString *)wifiPassword
+             completion:(void(^)(BOOL success, NSDictionary *result))completion {
+    
+    [self showMessage:@"Configuring device..."];
+    
+    // 根据设备类型选择适当的管理器
+    switch (device.productorName) {
+        case ProductorRadarQL:
+        case ProductorEspBle: {
+            // 使用RadarBleManager配置
+            [[RadarBleManager sharedManager] configureDevice:device
+                                              serverAddress:serverAddress
+                                                serverPort:serverPort
+                                             serverProtocol:serverProtocol
+                                                   wifiSsid:wifiSsid
+                                               wifiPassword:wifiPassword
+                                                 completion:^(BOOL success, NSDictionary *result) {
+                // 处理配置结果
+                if (success) {
+                    NSString *message = result[@"message"] ?: @"Configuration successful";
+                    [self showMessage:message];
+                } else {
+                    NSString *error = result[@"error"] ?: @"Unknown error";
+                    [self showMessage:[NSString stringWithFormat:@"Configuration failed: %@", error]];
+                }
+                
+                // 传递结果给原始调用者
+                if (completion) {
+                    completion(success, result);
+                }
+            }];
+            break;
+        }
+            
+        case ProductorSleepBoardHS: {
+            // 使用SleepaceBleManager配置
+            [[SleepaceBleManager getInstance:self] configureDevice:device
+                                                         wifiSsid:wifiSsid
+                                                     wifiPassword:wifiPassword
+                                                    serverAddress:serverAddress
+                                                       serverPort:serverPort
+                                                   serverProtocol:serverProtocol
+                                                       completion:^(BOOL success, NSDictionary *result) {
+                // 处理配置结果
+                if (success) {
+                    NSString *message = result[@"message"] ?: @"Configuration successful";
+                    [self showMessage:message];
+                } else {
+                    NSString *error = result[@"error"] ?: @"Unknown error";
+                    [self showMessage:[NSString stringWithFormat:@"Configuration failed: %@", error]];
+                }
+                
+                // 传递结果给原始调用者
+                if (completion) {
+                    completion(success, result);
+                }
+            }];
+            break;
+        }
+    }
+}
 // Radar设备的配置方法
 - (void)configureRadarDeviceWithWifiSsid:(NSString *)wifiSsid
                            wifiPassword:(NSString *)wifiPassword
@@ -913,10 +987,15 @@
         self.deviceRssiLabel.text = @"--";
         return;
     }
+
+        // 获取设备ID的最后4位
+    NSString *displayId = device.deviceId.length > 4 ? [device.deviceId substringFromIndex:device.deviceId.length - 4] :
+    device.deviceId;
     
-    // 更新设备信息显示
+    // 更新设备信息显示
     self.deviceNameLabel.text = device.deviceName;
-    self.deviceIdLabel.text = device.deviceId;
+    //self.deviceIdLabel.text = device.deviceId;
+    self.deviceIdLabel.text = [NSString stringWithFormat:@"%@", displayId];
     self.deviceRssiLabel.text = [NSString stringWithFormat:@"%lddBm", (long)device.rssi];
 }
 
@@ -944,18 +1023,38 @@
 #pragma mark - ScanViewControllerDelegate
 
 - (void)scanViewController:(ScanViewController *)controller didSelectDevice:(DeviceInfo *)device {
+    NSLog(@"=== MainVC 开始处理选中设备 ===");
     // 保存选中的设备并更新UI
     self.selectedDevice = device;
     [self updateDeviceDisplay:device];
     
     // 输出日志
-    MAINLOG(@"device select: %@ (%@, RSSI: %ld)", device.deviceName, device.deviceId, (long)device.rssi);
+    NSLog(@"device select: %@ (%@, RSSI: %ld)", device.deviceName, device.deviceId, (long)device.rssi);
     
     // 显示消息
     [self showMessage:[NSString stringWithFormat:@"Device selected: %@", device.deviceName]];
 }
 
 #pragma mark - UITextFieldDelegate
+- (void)textFieldDidEndEditing:(UITextField *)textField {
+    // 输入结束时自动去除头尾空格
+    textField.text = [textField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+}
+
+- (BOOL)textField:(UITextField *)textField shouldChangeCharactersInRange:(NSRange)range replacementString:(NSString *)string {
+    // 实时禁止输入空格（适用于所有输入框）
+    //if ([string containsString:@" "]) {
+    //    return NO;
+    //}
+    
+    // 服务器端口框：仅允许数字和协议前缀（tcp/udp）
+    if (textField == self.serverPortTextField) {
+        NSCharacterSet *allowedChars = [NSCharacterSet characterSetWithCharactersInString:@"0123456789tcpudpTCPUDP"];
+        return [string rangeOfCharacterFromSet:[allowedChars invertedSet]].location == NSNotFound;
+    }
+    
+    return YES;
+}
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
     [textField resignFirstResponder];
