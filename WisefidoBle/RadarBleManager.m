@@ -256,8 +256,18 @@
     
     // Access blufiClient through lazy getter to establish connection
     [self blufiClient];
-      RDRLOG(@"Connecting to device UUID: %@", device.uuid);
-    [_blufiClient connect:device.uuid]; // 关键：通过 UUID 发起连接
+
+    RDRLOG(@"Connecting to device UUID: %@", device.uuid);
+    
+    // 设置连接超时
+    _connectTimer = [NSTimer scheduledTimerWithTimeInterval:DEFAULT_CONNECT_TIMEOUT
+                                                     target:self
+                                                   selector:@selector(connectionTimedOut)
+                                                   userInfo:nil
+                                                    repeats:NO];
+    
+    [_blufiClient connect:device.uuid];
+
 }
 
   - (void)disconnect {
@@ -305,6 +315,66 @@
       _isQueryComplete = NO;
   }
 
+- (void)connectionTimedOut {
+    RDRLOG(@"Connection timed out for device: %@", _currentDevice.deviceName);
+    
+    // 通知错误回调
+    if (_errorCallback) {
+        _errorCallback(RadarBleErrorConnectionTimeout, @"Connection to device timed out");
+    }
+    
+    // 如果正在查询，通知查询失败
+    if (_queryCallback && !_isQueryComplete) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self->_queryCallback(self->_currentDevice, NO);
+            self->_queryCallback = nil;
+        });
+    }
+    
+    // 断开连接，清理资源
+    [self disconnect];
+}
+
+//等待蓝牙服务和特征被发现后再进行安全协商：
+- (void)blufi:(BlufiClient *)client gattPrepared:(BlufiStatusCode)status service:(nullable CBService *)service writeChar:(nullable CBCharacteristic *)writeChar notifyChar:(nullable CBCharacteristic *)notifyChar {
+    [_connectTimer invalidate];
+    _connectTimer = nil;
+    
+    if (status == StatusSuccess) {
+        RDRLOG(@"BluFi GATT prepared successfully with service: %@", service.UUID);
+        _isConnected = YES;
+        
+        // 如果正在查询，自动开始安全协商
+        if (_queryCallback && !_isQueryComplete) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self->_blufiClient negotiateSecurity];
+            });
+        }
+    } else {
+        _isConnected = NO;
+        
+        NSString *errorMsg = @"Blufi GATT preparation failed";
+        if (!service) {
+            errorMsg = @"Failed to discover Blufi service";
+        } else if (!writeChar) {
+            errorMsg = @"Failed to discover Blufi write characteristic";
+        } else if (!notifyChar) {
+            errorMsg = @"Failed to discover Blufi notify characteristic";
+        }
+        
+        RDRLOG(@"%@: %d", errorMsg, status);
+        
+        if (_queryCallback) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self->_queryCallback(self->_currentDevice, NO);
+                self->_queryCallback = nil;
+            });
+        }
+        
+        // 清理资源
+        [self disconnect];
+    }
+}
 
 #pragma mark - Scan Methods
 
@@ -849,7 +919,6 @@
     _hasWifiStatus = NO;
     _hasUID = NO;
     _hasMacAddress = NO;
-    
     // 初始化状态字典
     _statusMap = [NSMutableDictionary dictionary];
     
@@ -861,47 +930,28 @@
                                                 userInfo:nil
                                                  repeats:NO];
     
-    // 检查连接状态
-    BOOL isDeviceConnected = (_isConnected && _blufiClient && 
-                             [_currentDevice.uuid isEqualToString:device.uuid]);
-    
-    if (!isDeviceConnected) {
-        // 设备未连接，先连接设备
-        RDRLOG(@"Device not connected, connecting first...");
+    // 如果已连接到该设备，直接开始安全协商
+    if (_isConnected && _blufiClient && 
+        [_currentDevice.uuid isEqualToString:device.uuid]) {
+        RDRLOG(@"Device already connected, proceeding with security negotiation...");
         
-        [self connectDevice:device];
-        
-        // 使用延迟执行，确保连接有时间完成
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self->_blufiClient) {
-                // 进行安全协商
+        // 注意：延迟调用安全协商，确保特征已就绪
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            @try {
                 [self->_blufiClient negotiateSecurity];
-                
-                // 等待安全协商完成，在回调中继续执行查询
-                RDRLOG(@"Waiting for security negotiation to complete...");
-            } else {
-                // 连接失败
-                RDRLOG(@"Failed to connect to device");
-                if (self->_queryCallback) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        self->_queryCallback(self->_currentDevice, NO);
-                    });
-                }
-                
-                // 清理状态
-                [self->_queryTimer invalidate];
-                self->_queryTimer = nil;
+            } @catch (NSException *exception) {
+                RDRLOG(@"negotiateSecurity exception: %@", exception.reason);
+                // 连接可能已失效，需要重新连接
+                [self connectDevice:device];
             }
         });
     } else {
-        // 设备已连接，直接进行安全协商
-        RDRLOG(@"Device already connected, proceeding with security negotiation...");
-        [_blufiClient negotiateSecurity];
+        // 需要重新连接设备
+        RDRLOG(@"Device not connected, connecting first...");
+        [self connectDevice:device];
+        // 注意：连接成功后的安全协商会在 gattPrepared 回调中处理
     }
-    
-    // 注意：实际的查询操作将在didNegotiateSecurity回调中执行
 }
-
 
 /**
  * 查询超时处理 

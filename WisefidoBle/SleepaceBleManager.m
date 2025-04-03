@@ -6,6 +6,7 @@
 // 需要确保这些SDK相关的头文件被正确引入
 #import <BluetoothManager/BluetoothManager.h>  // 包含了SLPBLEManager等
 #import <BLEWifiConfig/BLEWifiConfig.h>        // WiFi配置相关
+#import <SLPCommon/SLPCommon.h>
 
 
 
@@ -49,6 +50,7 @@
 @property (nonatomic, strong) NSTimer *scanTimer;
 @property (nonatomic, strong) NSTimer *configTimer;
 @property (nonatomic, strong) NSTimer *connectTimer;
+@property  SLPDeviceTypes deviceTypeEnum;
 
 
 // Private methods
@@ -64,7 +66,8 @@
 
 - (void)invalidateScanTimer;
 - (void)invalidateConfigTimer;
-
+- (NSString *)getDeviceType:(NSString *)devicename ;
+- (SLPDeviceTypes)getSLPDeviceType:(NSString *)deviceTypeStr;
 
 @end
 
@@ -161,14 +164,14 @@
             CBPeripheral *peripheral = peripheralInfo.peripheral;
             // 获取服务UUID（从服务或硬编码）
             NSString *deviceName = peripheralInfo.name ?: @"Unknown"; //BM87224601903
-            NSString *deviceType = peripheral.name ?: @"Unknown";  //bm8701-2-ble
+            NSString *deviceType = [self getDeviceType:deviceName];  // peripheral.name ?: @"Unknown";  bm8701-2-ble
             NSString *uuid = peripheral.identifier.UUIDString; //iOS自定的
             
-            //去重并保存peripheral到缓存中，使用UUID作为键
             @synchronized(strongSelf->_peripheralCache) {
                 if (strongSelf->_peripheralCache[uuid]) { // 先检查是否已存在
                     return; // 已存在则直接返回
-                }
+                }               
+                          
                 [strongSelf->_peripheralCache setObject:peripheral forKey:uuid]; // 不存在才存储
                 SLPLOG(@"Cached peripheral for UUID: %@", uuid);
             }
@@ -178,6 +181,10 @@
             //SLPLOG(@"Peripheral: %@", peripheral);
             //SLPLOG(@"Peripheral name: %@", peripheral.name ?: @"nil");  
             //SLPLOG(@"Peripheral ID: %@", peripheral.identifier);
+            SLPLOG(@"Device name: %@", deviceName);
+            SLPLOG(@"Device type: %@", deviceType);
+            SLPLOG(@"Peripheral UUID: %@", peripheral.identifier.UUIDString);
+
             //SLPLOG(@"Peripheral state: %ld", (long)peripheral.state);
             //SLPLOG(@"PeripheralInfo name: %@", peripheralInfo.name ?: @"nil");
 
@@ -400,7 +407,8 @@
                                                       repeats:NO];
     
     // 指定设备类型为 SLPDeviceType_BM8701_2
-    SLPDeviceTypes deviceType = SLPDeviceType_BM8701_2;
+    //SLPDeviceTypes deviceType = SLPDeviceType_BM8701_2;
+    SLPDeviceTypes deviceType = [self getSLPDeviceType:device.deviceType];
     SLPLOG(@"Device type: %@", @(deviceType));
     
     // 标记配置状态
@@ -502,51 +510,53 @@
 
 - (void)queryDeviceStatus:(DeviceInfo *)deviceInfo
                completion:(SleepaceStatusCallback)completion {
-    // 检查 CBPeripheral 的 UUID 是否与 DeviceInfo 的 UUID 匹配
-    if ([self.currentPeripheral.identifier.UUIDString isEqualToString:deviceInfo.uuid]) {
-        // 打印日志
-        SLPLOG(@"Querying device status: %@ (UUID: %@)", deviceInfo.deviceName, deviceInfo.uuid);
-        // 创建 SLPDeviceTypes 对象，指定设备类型
-		SLPDeviceTypes deviceType = SLPDeviceType_BM8701_2;
-        // 查询设备 WiFi 连接状态
-        [_bleWifiConfig checkDeviceConnectWiFiStatus:self.currentPeripheral
-                                          deviceType:deviceType
-                                          completion:^(BOOL succeed, id data) {
-            BOOL success = NO;
-            
-            if (succeed && data && [data isKindOfClass:[SLPWiFiConnectStatus class]]) {
-                SLPWiFiConnectStatus *wifiStatus = (SLPWiFiConnectStatus *)data;
-                BOOL isConnected = wifiStatus.isConnected;
+    
+        // 检查 CBPeripheral 的 UUID 是否与 DeviceInfo 的 UUID 匹配
+        if ([self.currentPeripheral.identifier.UUIDString isEqualToString:deviceInfo.uuid]) {
+            // 打印日志
+            SLPLOG(@"Querying device status: %@ (UUID: %@)", deviceInfo.deviceName, deviceInfo.uuid);
+            // 创建 SLPDeviceTypes 对象，指定设备类型
+            SLPDeviceTypes deviceType = [self getSLPDeviceType:deviceInfo.deviceType]; //SLPDeviceType_BM8701_2;
+            // 查询设备 WiFi 连接状态
+            [_bleWifiConfig checkDeviceConnectWiFiStatus:self.currentPeripheral
+                                              deviceType:deviceType
+                                              completion:^(BOOL succeed, id data) {
+                BOOL success = NO;
                 
-                SLPLOG(@"Device WiFi status query successful: %@, connection status: %@", 
-                      deviceInfo.deviceName, isConnected ? @"Connected" : @"Disconnected");
+                if (succeed && data && [data isKindOfClass:[SLPWiFiConnectStatus class]]) {
+                    SLPWiFiConnectStatus *wifiStatus = (SLPWiFiConnectStatus *)data;
+                    BOOL isConnected = wifiStatus.isConnected;
+                    
+                    SLPLOG(@"Device WiFi status query successful: %@, connection status: %@",
+                           deviceInfo.deviceName, isConnected ? @"Connected" : @"Disconnected");
+                    
+                    // 更新 DeviceInfo 的 WiFi 状态
+                    deviceInfo.wifiConnected = isConnected;
+                    deviceInfo.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
+                    
+                    success = YES;
+                } else {
+                    SLPLOG(@"Device WiFi status query failed: %@", deviceInfo.deviceName);
+                }
                 
-                // 更新 DeviceInfo 的 WiFi 状态
-                deviceInfo.wifiConnected = isConnected;
-                deviceInfo.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
-                
-                success = YES;
-            } else {
-                SLPLOG(@"Device WiFi status query failed: %@", deviceInfo.deviceName);
-            }
-            
-            // 通知主界面查询完成
+                // 通知主界面查询完成
+                if (completion) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        completion(deviceInfo, success);
+                    });
+                }
+            }];
+        } else {
+            // UUID 不匹配，返回查询失败
+            SLPLOG(@"Error: Peripheral UUID does not match DeviceInfo UUID");
             if (completion) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    completion(deviceInfo, success);
+                    completion(deviceInfo, NO);
                 });
             }
-        }];
-    } else {
-        // UUID 不匹配，返回查询失败
-        SLPLOG(@"Error: Peripheral UUID does not match DeviceInfo UUID");
-        if (completion) {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                completion(deviceInfo, NO);
-            });
         }
     }
-}
+
 
 #pragma mark - Private Methods - Timer Handlers
 
@@ -840,4 +850,125 @@
     }];
 }
 
+// 根据设备名称识别设备类型，返回设备类型字符串
+- (NSString *)getDeviceType:(NSString *)devicename {
+    if ([devicename hasPrefix:@"SA11"]) {
+        return @"SAL";
+    }
+    else if ([devicename hasPrefix:@"EW1W"]) {
+        return @"EW201W";
+    }
+    else if ([devicename hasPrefix:@"M8"]) {
+        return @"M800";
+    }
+    else if ([devicename hasPrefix:@"SN91E"]) {
+        return @"SN913E";
+    }
+    else if ([devicename hasPrefix:@"BM8721"]) {
+        return @"BM8701";
+    }
+    else if ([devicename hasPrefix:@"BM8722"]) {
+        return @"BM8701_2";
+    }
+    else if ([devicename hasPrefix:@"BM871W"]) {
+        return @"M8701W";
+    }
+    else if ([devicename hasPrefix:@"FH61W"]) {
+        return @"FH601W";
+    }
+    else if ([devicename hasPrefix:@"BG01A"]) {
+        return @"BG001A";
+    }
+    else if ([devicename hasPrefix:@"SN22"]) {
+        return @"NOX2_WIFI";
+    }
+    else if ([devicename hasPrefix:@"EW22W"]) {
+        return @"EW202W";
+    }
+    else if ([devicename hasPrefix:@"PA61W"]) {
+        return @"PA601W";
+    }
+    else if ([devicename hasPrefix:@"SA1001"]) {
+        return @"SA1001";
+    }
+    else if ([devicename hasPrefix:@"TAS"]) {
+        return @"TAS";
+    }
+    else if ([devicename hasPrefix:@"SN5"]) {
+        return @"NOX_TYPE";
+    }
+    else if ([devicename hasPrefix:@"SN602"]) {
+        return @"SNP602";
+    }
+    else if ([devicename hasPrefix:@"BP"]) {
+        return @"BP001";
+    }
+    else if ([devicename hasPrefix:@"SA63W"]) {
+        return @"SA603W";
+    }
+    else if ([devicename hasPrefix:@"SA62W"]) {
+        return @"SA602W";
+    }
+    else if ([devicename hasPrefix:@"RS1"]) {
+        return @"RESTON";
+    }
+    else if ([devicename hasPrefix:@"SN2"]) {
+        return @"STARSHIP";
+    }
+    else if ([devicename hasPrefix:@"SSBS"]) {
+        return @"BLE_SPRING";
+    }
+    else if ([devicename hasPrefix:@"SW"]) {
+        return @"SLEEPWING";
+    }
+    else if ([devicename hasPrefix:@"Z"]) {
+        return @"Z300";
+    }
+    // 默认类型
+    return @"WIFI_RESTON";
+}
+
+// 根据设备类型字符串转换为对应的SLPDeviceTypes枚举值
+- (SLPDeviceTypes)getSLPDeviceType:(NSString *)deviceTypeStr {
+    if ([deviceTypeStr isEqualToString:@"SAL"]) {
+        return SLPDeviceType_Sal;
+    }
+    else if ([deviceTypeStr isEqualToString:@"EW201W"]) {
+        return SLPDeviceType_EW201W;
+    }
+    else if ([deviceTypeStr isEqualToString:@"M800"]) {
+        return SLPDeviceType_M800;
+    }
+    else if ([deviceTypeStr isEqualToString:@"SN913E"]) {
+        return SLPDeviceType_SN913E;
+    }
+    else if ([deviceTypeStr isEqualToString:@"BM8701"]) {
+        return SLPDeviceType_BM8701;
+    }
+    else if ([deviceTypeStr isEqualToString:@"BM8701_2"]) {
+        return SLPDeviceType_BM8701_2;
+    }
+    else if ([deviceTypeStr isEqualToString:@"M8701W"]) {
+        return SLPDeviceType_M8701W;
+    }
+    else if ([deviceTypeStr isEqualToString:@"FH601W"]) {
+        return SLPDeviceType_FH601W;
+    }
+    else if ([deviceTypeStr isEqualToString:@"BG001A"]) {
+        return SLPDeviceType_BG001A;
+    }
+    else if ([deviceTypeStr isEqualToString:@"NOX2_WIFI"]) {
+        return SLPDeviceType_NOX2_WiFi;
+    }
+    else if ([deviceTypeStr isEqualToString:@"EW202W"]) {
+        return SLPDeviceType_EW202W;
+    }
+    else if ([deviceTypeStr isEqualToString:@"PA601W"]) {
+        return SLPDeviceType_FH601W;
+    }
+
+    // 默认类型
+    return SLPDeviceType_WIFIReston;
+}
+    
 @end
