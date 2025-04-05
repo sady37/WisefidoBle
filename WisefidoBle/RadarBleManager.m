@@ -127,7 +127,7 @@
 //BlufiClient lazy 
 - (BlufiClient *)blufiClient {
     if (!_blufiClient && _currentDevice) {
-        RDRLOG("Lazy initializing BlufiClient for device: %@", _currentDevice.uuid);
+        RDRLOG("Lazy initializing BlufiClient for device: ");
         
         _blufiClient = [[BlufiClient alloc] init];
         // 保留必要的代理设置
@@ -206,7 +206,7 @@
     
     // Check if already connected to this device
     if (_isConnected && _currentDevice && [_currentDevice.uuid isEqualToString:device.uuid]) {
-        RDRLOG(@"Already connected to device: %@", device.deviceName);
+        RDRLOG(@"Already connected to device");
         return;
     }
     // If connected to different device, disconnect first
@@ -241,7 +241,7 @@
     
     // Check if already connected to this device
     if (_isConnected && _currentDevice && [_currentDevice.uuid isEqualToString:device.uuid]) {
-        RDRLOG(@"Already connected to device: %@", device.deviceName);
+        RDRLOG(@"Already connected to device");
         return;
     }
     
@@ -257,7 +257,7 @@
     // Access blufiClient through lazy getter to establish connection
     [self blufiClient];
 
-    RDRLOG(@"Connecting to device UUID: %@", device.uuid);
+    RDRLOG(@"Connecting to device");
     
     // 设置连接超时
     _connectTimer = [NSTimer scheduledTimerWithTimeInterval:DEFAULT_CONNECT_TIMEOUT
@@ -316,7 +316,7 @@
   }
 
 - (void)connectionTimedOut {
-    RDRLOG(@"Connection timed out for device: %@", _currentDevice.deviceName);
+    RDRLOG(@"Connection timed out for device");
     
     // 通知错误回调
     if (_errorCallback) {
@@ -341,7 +341,7 @@
     _connectTimer = nil;
     
     if (status == StatusSuccess) {
-        RDRLOG(@"BluFi GATT prepared successfully with service: %@", service.UUID);
+        RDRLOG(@"BluFi GATT prepared successfully with service");
         _isConnected = YES;
         
         // 如果正在查询，自动开始安全协商
@@ -524,16 +524,16 @@
             return; // 已存在则跳过
         }
         strongSelf->_peripheralCache[uuid] = peripheral; // 不存在才存储
-        RDRLOG(@"Cached peripheral for UUID: %@", uuid);
+        //RDRLOG(@"Cached peripheral for UUID: %@", uuid);
     }
 
     // 打印详细日志
-    RDRLOG(@"设备信息:");
-    RDRLOG(@"Peripheral: %@", peripheral);
-    RDRLOG(@"Peripheral name: %@", peripheral.name ?: @"nil");
-    RDRLOG(@"Peripheral ID: %@", peripheral.identifier);
-    RDRLOG(@"Peripheral state: %ld", (long)peripheral.state);
-    RDRLOG(@"RSSI: %@", RSSI);
+    //RDRLOG(@"设备信息:");
+    //RDRLOG(@"Peripheral: %@", peripheral);
+    //RDRLOG(@"Peripheral name: %@", peripheral.name ?: @"nil");
+    //RDRLOG(@"Peripheral ID: %@", peripheral.identifier);
+    //RDRLOG(@"Peripheral state: %ld", (long)peripheral.state);
+    //RDRLOG(@"RSSI: %@", RSSI);
     
     // 创建设备信息对象
     DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:ProductorRadarQL
@@ -572,7 +572,7 @@
                wifiSsid:(nullable NSString *)wifiSsid
            wifiPassword:(nullable NSString *)wifiPassword
              completion:(RadarConfigCallback)completion {
-    RDRLOG(@"Starting device configuration for: %@", device.deviceName);
+    RDRLOG(@"Starting device configuration");
     
     // 参数验证
     if (!device || !device.uuid) {
@@ -897,7 +897,7 @@
  */
 - (void)queryDeviceStatus:(DeviceInfo *)device
               completion:(void(^)(DeviceInfo *updatedDevice, BOOL success))completion {
-    RDRLOG(@"Start querying device status for: %@, UUID: %@", device.deviceName, device.uuid);
+    //RDRLOG(@"Start querying device status for: %@, UUID: %@", device.deviceName, device.uuid);
     
     // 参数验证
     if (!device || !device.uuid) {
@@ -967,8 +967,7 @@
         BOOL hasPartialData = (_hasUID || _hasMacAddress || _hasWifiStatus);
         
         if (hasPartialData) {
-            RDRLOG(@"Some data available (UID:%d, MAC:%d, WiFi:%d), returning partial results",
-                   _hasUID, _hasMacAddress, _hasWifiStatus);
+            //RDRLOG(@"Some data available (UID:%d, MAC:%d, WiFi:%d), returning partial results",_hasUID, _hasMacAddress, _hasWifiStatus);
             [self finishQuery:YES]; // 返回部分数据
         } else {
             RDRLOG(@"No data available, query failed");
@@ -1077,7 +1076,7 @@
         [_statusMap setObject:uid forKey:@"uid"];
         _hasUID = YES;
         
-        RDRLOG(@"Received device UID: %@", uid);
+        RDRLOG(@"Received device UID");
         
         // 继续查询MAC地址
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1106,7 +1105,7 @@
         [_statusMap setObject:macAddress forKey:@"macAddress"];
         _hasMacAddress = YES;
         
-        RDRLOG(@"Received device MAC address: %@", macAddress);
+        RDRLOG(@"Received device MAC address");
         
         // 继续查询WiFi状态
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1431,7 +1430,7 @@
         return;
     }
     
-    RDRLOG(@"Did discover services for peripheral: %@", peripheral.identifier.UUIDString);
+    //RDRLOG(@"Did discover services for peripheral: %@", peripheral.identifier.UUIDString);
     // BlufiClient会处理后续操作，这里不需要特别实现
 }
 
@@ -1441,7 +1440,7 @@
         return;
     }
     
-    RDRLOG(@"Did discover characteristics for service: %@", service.UUID.UUIDString);
+    //RDRLOG(@"Did discover characteristics for service: %@", service.UUID.UUIDString);
     // BlufiClient会处理后续操作，这里不需要特别实现
 }
 

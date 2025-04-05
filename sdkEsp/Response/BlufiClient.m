@@ -178,7 +178,7 @@ enum {
 }
 
 - (void)scanBLE {
-    NSLog(@"Blufi Scan device: %@", _identifier);
+    //NSLog(@"Blufi Scan device: %@", _identifier);
     [_centralManager scanForPeripheralsWithServices:nil options:nil];
 }
 

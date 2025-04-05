@@ -187,6 +187,7 @@
     [self setupActions];
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
+    tap.cancelsTouchesInView = NO; // 允许触摸事件传递给子视图
 [self.view addGestureRecognizer:tap];
 
     
@@ -506,7 +507,7 @@
             __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
 
-        SCANLOG(@"Received device: %@, deviceType:%@, UUID: %@", deviceInfo.deviceName,deviceInfo.deviceType,deviceInfo.uuid);
+        //SCANLOG(@"Received device: %@, deviceType:%@, UUID: %@", deviceInfo.deviceName,deviceInfo.deviceType,deviceInfo.uuid);
         
         // 阶段1：去重检查
         //if (![self checkAndStoreInDictionary:deviceInfo]) return;
@@ -575,7 +576,7 @@
             });
             return;
         }
-        SCANLOG(@"Received Sleep device: %@, deviceType:%@, UUID: %@", deviceInfo.deviceName, deviceInfo.deviceType,deviceInfo.uuid);
+        SCANLOG(@"Received Sleep device");
         
         // 阶段1：去重检查
         //if (![self checkAndStoreInDictionary:deviceInfo]) return;
@@ -615,14 +616,21 @@
     if (_deviceList.count == 0) {
         // 如果没有设备，直接结束扫描
         _isScanning = NO;
+        _isRssiScanning = NO;
         [self updateScanButtonState];
-        [self stopScan];
+        //[self stopScan];
         return;
     }
     
     // 3. 延迟500ms再开始RSSI扫描，确保Sleepace扫描完全停止
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        // 4. 开始RSSI扫描
+    // 4. 开始RSSI扫描
+    if (!self->_isScanning) {
+        SCANLOG(@"Scanning was canceled before RSSI scan");
+        return;
+       }
+        self->_isRssiScanning = YES;
+        [self updateScanButtonState];
         [self startRssiScan];
     });
 }
@@ -648,34 +656,58 @@
 }
 
 
-//  stopScan 方法
-// 在 stopScan 方法开始处立即停止蓝牙扫描，不要等待其他操作
+//stopScan 方法
 - (void)stopScan {
-    SCANLOG(@"stopScan called, current isScanning=%d", _isScanning);
-    
-    if (!_isScanning) {
+        if (!_isScanning && !_isRssiScanning) {
         SCANLOG(@"No scan in progress, ignoring stop request");
         return;
     }
-   
-    // 1. 立即保存状态并更新标志（放在最前面）
+
+    SCANLOG(@"stopScan called, current isScanning=%d, isRssiScanning=%d", _isScanning, _isRssiScanning);
+ 
+
     _isScanning = NO;
-    
-    // 2. 立即更新 UI（使用主线程）
+    _isRssiScanning = NO;
     [self updateScanButtonState];
-    
-    // 3. 在主线程或后台线程中执行停止扫描的操作
-    // 使用后台线程执行停止操作，防止阻塞
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // 停止所有蓝牙扫描活动
-        @try {
-            [self.cbManager stopScan];
-            SCANLOG(@"CoreBluetooth scanning stopped");
-        } @catch (NSException *exception) {
-            SCANLOG(@"Exception stopping CoreBluetooth scan: %@", exception);
+
+    // 3. 取消定时器（主线程）
+    // 在主线程中执行操作，确保线程安全
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // 1. 取消所有定时器
+        SCANLOG(@"Invalidating all timers");
+        if (self->_rssiScanTimer) {
+            [self->_rssiScanTimer invalidate];
+            self->_rssiScanTimer = nil;
+        }
+
+        if (self->_radarScanTimer) {
+            [self->_radarScanTimer invalidate];
+            self->_radarScanTimer = nil;
         }
         
-        // 根据当前扫描模块，停止特定SDK的扫描
+        if (self->_sleepaceScanTimer) {
+            [self->_sleepaceScanTimer invalidate];
+            self->_sleepaceScanTimer = nil;
+        }
+        
+        // 2. 停止CoreBluetooth扫描（关键步骤）
+        @try {
+            SCANLOG(@"Stopping CoreBluetooth scanning");
+            if (self->_cbManager) {
+                [self->_cbManager stopScan];
+                // 延迟释放，确保蓝牙操作完成
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), 
+                            dispatch_get_main_queue(), ^{
+                    self->_cbManager.delegate = nil;
+                    self->_cbManager = nil;
+                    SCANLOG(@"CBCentralManager completely released");
+                });
+            }
+        } @catch (NSException *exception) {
+            SCANLOG(@"Exception while stopping CoreBluetooth scan: %@", exception);
+        }
+        
+        // 3. 根据当前扫描模块停止特定扫描
         @try {
             switch (self->_currentScanModule) {
                 case ProductorRadarQL:
@@ -689,30 +721,12 @@
                     break;
             }
         } @catch (NSException *exception) {
-            SCANLOG(@"Exception stopping manager scan: %@", exception);
+            SCANLOG(@"Exception while stopping manager scan: %@", exception);
         }
         
-        // 返回主线程处理定时器和UI更新
-        dispatch_async(dispatch_get_main_queue(), ^{
-            // 取消所有定时器
-            if (self->_rssiScanTimer && [self->_rssiScanTimer isValid]) {
-                [self->_rssiScanTimer invalidate];
-                self->_rssiScanTimer = nil;
-            }
-            
-            if (self->_radarScanTimer && [self->_radarScanTimer isValid]) {
-                [self->_radarScanTimer invalidate];
-                self->_radarScanTimer = nil;
-            }
-            
-            if (self->_sleepaceScanTimer && [self->_sleepaceScanTimer isValid]) {
-                [self->_sleepaceScanTimer invalidate];
-                self->_sleepaceScanTimer = nil;
-            }
-            
-            SCANLOG(@"All scan operations and timers stopped");
-        });
+        SCANLOG(@"All scan operations stopped");
     });
+
 }
 
 #pragma mark - RSSI扫描
@@ -725,8 +739,11 @@
         [self updateScanButtonState];
         return;
     }
-    _isScanning = YES;
-    [self updateScanButtonState];
+        // 检查是否仍处于扫描模式
+    if (!_isScanning || !_isRssiScanning) {
+        SCANLOG(@"Scanning was canceled, skip RSSI scan");
+        return;
+    }
 
     // 通过懒加载获取 cbManager
     if (self.cbManager.state != CBManagerStatePoweredOn) {
@@ -775,11 +792,15 @@
      advertisementData:(NSDictionary *)advertisementData 
                   RSSI:(NSNumber *)RSSI 
 {
+        if (!self->_isScanning || !self->_isRssiScanning) {
+        SCANLOG(@"Warn:Stop Scan, ignoring the device: %@", peripheral.identifier);
+        return;  // 丢弃非活动扫描的结果
+    }
+
     NSString *uuid = peripheral.identifier.UUIDString;
     NSInteger rssiValue = [RSSI integerValue];
     
-    SCANLOG(@"BLE callback - Discovered peripheral: %@, UUID: %@, RSSI: %ld", 
-           peripheral.name ?: @"Unknown", uuid, (long)rssiValue);
+    //SCANLOG(@"BLE callback - Discovered peripheral: %@, UUID: %@, RSSI: %ld",peripheral.name ?: @"Unknown", uuid, (long)rssiValue);
     
     // 在设备列表中查找匹配的设备
     BOOL deviceUpdated = NO;
@@ -789,8 +810,7 @@
             device.rssi = rssiValue;
             device.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
             deviceUpdated = YES;
-            
-            SCANLOG(@"Updated RSSI for device: %@", device.deviceName);
+            //SCANLOG(@"Updated RSSI for device: %@", device.deviceName);
             break;
         }
     }
@@ -830,7 +850,12 @@
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     // 取消选中高亮状态
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    
+    /* 记录选择设备的时间点
+    NSTimeInterval selectTime = [[NSDate date] timeIntervalSince1970];
+    NSString *timeString = [NSDateFormatter localizedStringFromDate:[NSDate date]
+                                                         dateStyle:NSDateFormatterNoStyle
+                                                         timeStyle:NSDateFormatterMediumStyle];
+    */
     // 确保索引在有效范围内
     if (indexPath.row < 0 || indexPath.row >= _deviceList.count) {
         NSLog(@"Invalid indexPath.row: %ld", (long)indexPath.row);
@@ -839,6 +864,15 @@
     
     // 获取选中的设备
     DeviceInfo *device = _deviceList[indexPath.row];
+    // 停止扫描前记录状态
+    //SCANLOG(@"[%@] About to stop scan. Current state - isScanning: %d, isRssiScanning: %d",timeString, _isScanning, _isRssiScanning);
+
+    // 停止所有扫描
+    [self stopScan];
+    
+    // 停止扫描后记录状态
+    //SCANLOG(@"[%@] After stopping scan. Current state - isScanning: %d, isRssiScanning: %d",timeString, _isScanning, _isRssiScanning);
+
         // 根据设备类型处理选取逻辑
     switch (device.productorName) {
         case ProductorSleepBoardHS: {
@@ -846,6 +880,14 @@
             //[[SleepaceBleManager getInstance:self] setCurrentDevice:device];
             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                 [[SleepaceBleManager getInstance:self] setCurrentDevice:device];
+                
+                //NSTimeInterval processingTime = [[NSDate date] timeIntervalSince1970] - selectTime;
+                //SCANLOG(@"[%@] SleepaceBleManager device setting completed in %.3f seconds", 
+                //      [NSDateFormatter localizedStringFromDate:[NSDate date] 
+                //                                   dateStyle:NSDateFormatterNoStyle 
+                //                                   timeStyle:NSDateFormatterMediumStyle], 
+                //      processingTime);
+
             });
             //SCANLOG(@"Sleepace device selected: %@", device.deviceName);
             break;
@@ -877,23 +919,39 @@
         SCANLOG(@"Connected Sleepace device: %@", device.deviceName);
     }*/ 
 
-    // 停止扫描
-    [self stopScan];
+
     
     // 使用主线程确保UI操作的安全性
     dispatch_async(dispatch_get_main_queue(), ^{
         // 通知代理
         if (self.delegate && [self.delegate respondsToSelector:@selector(scanViewController:didSelectDevice:)]) {
-            NSLog(@"调用代理方法");
+            //SCANLOG(@"[%@] Calling delegate method", timeString);
             [self.delegate scanViewController:self didSelectDevice:device];
-            NSLog(@"代理方法已调用");
+            
+            /*NSTimeInterval delegateTime = [[NSDate date] timeIntervalSince1970] - selectTime;
+            SCANLOG(@"[%@] Delegate method completed in %.3f seconds", 
+                  [NSDateFormatter localizedStringFromDate:[NSDate date] 
+                                               dateStyle:NSDateFormatterNoStyle 
+                                               timeStyle:NSDateFormatterMediumStyle], 
+                  delegateTime);*/
         } else {
-            NSLog(@"代理不存在或不响应方法");
+            //SCANLOG(@"[%@] Delegate not available or does not respond to method", timeString);
         }
         
         // 延迟关闭视图，确保代理方法完成
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            NSLog(@"关闭视图");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            /*SCANLOG(@"[%@] Dismissing view controller", 
+                  [NSDateFormatter localizedStringFromDate:[NSDate date] 
+                                               dateStyle:NSDateFormatterNoStyle 
+                                               timeStyle:NSDateFormatterMediumStyle]);
+            
+            //NSTimeInterval totalTime = [[NSDate date] timeIntervalSince1970] - selectTime;
+            SCANLOG(@"[%@] Total processing time: %.3f seconds", 
+                  [NSDateFormatter localizedStringFromDate:[NSDate date] 
+                                               dateStyle:NSDateFormatterNoStyle 
+                                               timeStyle:NSDateFormatterMediumStyle], 
+                  totalTime);*/
+            
             [self dismissViewControllerAnimated:YES completion:nil];
         });
     });
@@ -1102,6 +1160,13 @@
           // 停止扫描
           [self stopScan];
 
+        // 确保 cbManager 被正确清理
+        if (self->_cbManager) {
+            [self->_cbManager stopScan];
+            self->_cbManager.delegate = nil;
+            self->_cbManager = nil;
+            SCANLOG(@"CBCentralManager properly released");
+        }
           // 在主线程关闭视图
           dispatch_async(dispatch_get_main_queue(), ^{
               [self dismissViewControllerAnimated:YES completion:nil];

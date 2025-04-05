@@ -222,7 +222,32 @@
     _serverPortTextField.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_serverPortTextField];
 
-    // ------------ 历史记录区域 ------------
+    // ------------ WiFi配置区域 ------------
+    _wifiInfoLabel = [[UILabel alloc] init];
+    _wifiInfoLabel.text = @"Select WLAN to connect device";
+    _wifiInfoLabel.font = [UIFont systemFontOfSize:14];
+    _wifiInfoLabel.textColor = [UIColor systemGrayColor];
+    _wifiInfoLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_wifiInfoLabel];
+
+    // WiFi名称输入框（统一使用实例变量）
+    _wifiNameTextField = [[UITextField alloc] init];
+    _wifiNameTextField.placeholder = @"WiFi Name";
+    _wifiNameTextField.borderStyle = UITextBorderStyleRoundedRect;
+    _wifiNameTextField.delegate = self;
+    _wifiNameTextField.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_wifiNameTextField];
+
+    // WiFi密码输入框（统一使用实例变量）
+    _wifiPasswordTextField = [[UITextField alloc] init];
+    _wifiPasswordTextField.placeholder = @"Password";
+    _wifiPasswordTextField.borderStyle = UITextBorderStyleRoundedRect;
+    _wifiPasswordTextField.secureTextEntry = YES;
+    _wifiPasswordTextField.delegate = self;
+    _wifiPasswordTextField.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:_wifiPasswordTextField];
+
+        // ------------ 历史记录区域 ------------
     _historyContainer = [[UIView alloc] init];
     _historyContainer.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_historyContainer];
@@ -248,31 +273,6 @@
     }
     _recentWifiButton.translatesAutoresizingMaskIntoConstraints = NO;
     [_historyContainer addSubview:_recentWifiButton];
-
-    // ------------ WiFi配置区域 ------------
-    _wifiInfoLabel = [[UILabel alloc] init];
-    _wifiInfoLabel.text = @"Select WLAN to connect device";
-    _wifiInfoLabel.font = [UIFont systemFontOfSize:14];
-    _wifiInfoLabel.textColor = [UIColor systemGrayColor];
-    _wifiInfoLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_wifiInfoLabel];
-
-    // WiFi名称输入框（统一使用实例变量）
-    _wifiNameTextField = [[UITextField alloc] init];
-    _wifiNameTextField.placeholder = @"WiFi Name";
-    _wifiNameTextField.borderStyle = UITextBorderStyleRoundedRect;
-    _wifiNameTextField.delegate = self;
-    _wifiNameTextField.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_wifiNameTextField];
-
-    // WiFi密码输入框（统一使用实例变量）
-    _wifiPasswordTextField = [[UITextField alloc] init];
-    _wifiPasswordTextField.placeholder = @"Password";
-    _wifiPasswordTextField.borderStyle = UITextBorderStyleRoundedRect;
-    _wifiPasswordTextField.secureTextEntry = YES;
-    _wifiPasswordTextField.delegate = self;
-    _wifiPasswordTextField.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_wifiPasswordTextField];
 
     // ------------ 状态输出区域 ------------
     _statusOutputTextView = [[UITextView alloc] init];
@@ -346,6 +346,7 @@
         [_serverInfoLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16]
     ]];
     
+
 // 服务器地址和端口输入框约束
 	[NSLayoutConstraint activateConstraints:@[
 	    // 地址输入框
@@ -364,10 +365,38 @@
             [_serverAddressTextField.widthAnchor constraintEqualToAnchor:self.serverPortTextField.widthAnchor multiplier:1.5] // 6.0/4.0=1.5
         
 	]];
+
+    // WiFi信息标签约束
+    [NSLayoutConstraint activateConstraints:@[
+        [_wifiInfoLabel.topAnchor constraintEqualToAnchor:_serverPortTextField.bottomAnchor constant:16],
+        [_wifiInfoLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [_wifiInfoLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16]
+    ]];
+
+    // WiFi名称和密码输入框约束
+    [NSLayoutConstraint activateConstraints:@[
+        [_wifiNameTextField.topAnchor constraintEqualToAnchor:_wifiInfoLabel.bottomAnchor constant:8],
+        [_wifiNameTextField.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [_wifiNameTextField.trailingAnchor constraintEqualToAnchor:self.wifiPasswordTextField.leadingAnchor constant:-8], // 间距8
+        [_wifiNameTextField.heightAnchor constraintEqualToConstant:44],
+        
+        [_wifiPasswordTextField.topAnchor constraintEqualToAnchor:_wifiInfoLabel.bottomAnchor constant:8],
+        [_wifiPasswordTextField.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [_wifiPasswordTextField.heightAnchor constraintEqualToConstant:44],
+        
+        // 关键修改：设置6:4的宽度比例
+        //[_wifiNameTextField.widthAnchor constraintEqualToAnchor:self.wifiPasswordTextField.widthAnchor multiplier:6.0/4.0]
+            [_wifiNameTextField.widthAnchor constraintEqualToAnchor:_wifiPasswordTextField.widthAnchor], // 1:1基础比例
+        
+        
+        // 最小宽度保护（新增）
+        [_wifiNameTextField.widthAnchor constraintGreaterThanOrEqualToConstant:120],
+        [_wifiPasswordTextField.widthAnchor constraintGreaterThanOrEqualToConstant:100]
+    ]];
     
     // 历史容器约束
     [NSLayoutConstraint activateConstraints:@[
-        [_historyContainer.topAnchor constraintEqualToAnchor:self.serverAddressTextField.bottomAnchor constant:8],
+        [_historyContainer.topAnchor constraintEqualToAnchor:self.wifiPasswordTextField.bottomAnchor constant:8],
         [_historyContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [_historyContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_historyContainer.heightAnchor constraintEqualToConstant:44]
@@ -387,37 +416,11 @@
         [_recentWifiButton.heightAnchor constraintEqualToConstant:44]
     ]];
     
-    // WiFi信息标签约束
-    [NSLayoutConstraint activateConstraints:@[
-        [_wifiInfoLabel.topAnchor constraintEqualToAnchor:_historyContainer.bottomAnchor constant:16],
-        [_wifiInfoLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [_wifiInfoLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16]
-    ]];
-    
-// WiFi名称和密码输入框约束
-[NSLayoutConstraint activateConstraints:@[
-    [_wifiNameTextField.topAnchor constraintEqualToAnchor:_wifiInfoLabel.bottomAnchor constant:8],
-    [_wifiNameTextField.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-    [_wifiNameTextField.trailingAnchor constraintEqualToAnchor:self.wifiPasswordTextField.leadingAnchor constant:-8], // 间距8
-    [_wifiNameTextField.heightAnchor constraintEqualToConstant:44],
-    
-    [_wifiPasswordTextField.topAnchor constraintEqualToAnchor:_wifiInfoLabel.bottomAnchor constant:8],
-    [_wifiPasswordTextField.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-    [_wifiPasswordTextField.heightAnchor constraintEqualToConstant:44],
-    
-    // 关键修改：设置6:4的宽度比例
-    //[_wifiNameTextField.widthAnchor constraintEqualToAnchor:self.wifiPasswordTextField.widthAnchor multiplier:6.0/4.0]
-        [_wifiNameTextField.widthAnchor constraintEqualToAnchor:_wifiPasswordTextField.widthAnchor], // 1:1基础比例
-    
-    
-    // 最小宽度保护（新增）
-    [_wifiNameTextField.widthAnchor constraintGreaterThanOrEqualToConstant:120],
-    [_wifiPasswordTextField.widthAnchor constraintGreaterThanOrEqualToConstant:100]
-]];
-    
+
+
     // 状态输出区域约束
     [NSLayoutConstraint activateConstraints:@[
-        [_statusOutputTextView.topAnchor constraintEqualToAnchor:self.wifiNameTextField.bottomAnchor constant:16],
+        [_statusOutputTextView.topAnchor constraintEqualToAnchor:self.historyContainer.bottomAnchor constant:16],
         [_statusOutputTextView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [_statusOutputTextView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_statusOutputTextView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-16]
@@ -494,7 +497,7 @@
 }
 
 - (void)handleStatusButton:(id)sender  {
-	    MAINLOG(@"点击了 Status 按钮!!!");
+	    MAINLOG(@"Status button tapped!!");
     // 检查设备选择
     if (!self.selectedDevice) {
         [self showMessage:@"Please select a device first"];
@@ -705,7 +708,7 @@
                                                                            options:NSRegularExpressionCaseInsensitive
                                                                              error:&error];
     if (error) {
-        MAINLOG(@"正则表达式错误: %@", error);
+        MAINLOG(@"Regular expression error: %@", error);
         return nil;
     }
     
@@ -829,7 +832,7 @@
 	                                     wifiPassword:wifiPassword
 	                                       completion:^(BOOL success, NSDictionary *result) {
         if (success) {
-            [self showMessage:@"Configuration successful"];
+            [self showMessage:@"Configuration successful, please wait for the device to reboot"];
             
             // 更新设备信息
             self.selectedDevice.wifiSsid = wifiSsid;
@@ -863,7 +866,7 @@
                                            serverProtocol:serverProtocol
                                                completion:^(BOOL success, NSDictionary *result) {
         if (success) {
-            [self showMessage:@"Configuration successful"];
+            [self showMessage:@"Configuration successful, please wait for the device to reboot"];
             
             // 更新设备信息
             self.selectedDevice.wifiSsid = wifiSsid;
@@ -901,7 +904,7 @@
     
     [[SleepaceBleManager getInstance:self] queryDeviceStatus:device completion:^(DeviceInfo *updatedDevice, BOOL success) {
         if (!success) {
-            [self showMessage:@"Failed to query Sleepace device status"];
+            [self showMessage:@"Failed, please rescan;deviceType BM8701_2 is not support query"];
             return;
         }
         
@@ -1023,13 +1026,13 @@
 #pragma mark - ScanViewControllerDelegate
 
 - (void)scanViewController:(ScanViewController *)controller didSelectDevice:(DeviceInfo *)device {
-    NSLog(@"=== MainVC 开始处理选中设备 ===");
+    NSLog(@"=== MainVC strat  ===");
     // 保存选中的设备并更新UI
     self.selectedDevice = device;
     [self updateDeviceDisplay:device];
     
     // 输出日志
-    NSLog(@"device select: %@ (%@, RSSI: %ld)", device.deviceName, device.deviceId, (long)device.rssi);
+    //NSLog(@"device select: %@ (%@, RSSI: %ld)", device.deviceName, device.deviceId, (long)device.rssi);
     
     // 显示消息
     [self showMessage:[NSString stringWithFormat:@"Device selected: %@", device.deviceName]];

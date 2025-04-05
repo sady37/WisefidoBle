@@ -1,5 +1,6 @@
 // ConfigStorage.m
 #import "ConfigStorage.h"
+#import <Security/Security.h>
 //#import "ConfigModels.h" // Ensure this is imported for the extern declaration of kDefaultRadarDeviceName
 
 // 定义 UserDefaults 键
@@ -55,43 +56,140 @@ static const NSInteger kMaxConfigCount = 5;
     return [self loadArrayForKey:kServerConfigsKey] ?: @[];
 }
 
-// 更新 WiFi 配置保存逻辑
-- (void)saveWiFiConfigWithSsid:(NSString *)wifiSsid password:(NSString *)wifiPassword {
+//wifi password  save to Keychain
+// 保存字符串到Keychain
+- (BOOL)saveSecureString:(NSString *)string forKey:(NSString *)key {
+    if (!string || !key) return NO;
+    
+    // 删除可能存在的旧数据
+    [self deleteSecureItemForKey:key];
+    
+    // 准备数据
+    NSData *data = [string dataUsingEncoding:NSUTF8StringEncoding];
+    
+    // 准备查询字典
+    NSMutableDictionary *query = [NSMutableDictionary dictionary];
+    [query setObject:(__bridge id)kSecClassGenericPassword forKey:(__bridge id)kSecClass];
+    [query setObject:key forKey:(__bridge id)kSecAttrAccount];
+    [query setObject:data forKey:(__bridge id)kSecValueData];
+    [query setObject:(__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly 
+              forKey:(__bridge id)kSecAttrAccessible];
+    
+    // 添加到Keychain
+    OSStatus status = SecItemAdd((__bridge CFDictionaryRef)query, NULL);
+    return (status == errSecSuccess);
+}
+
+// 从Keychain加载字符串
+- (NSString *)loadSecureStringForKey:(NSString *)key {
+    if (!key) return nil;
+    
+    // 准备查询字典
+    NSMutableDictionary *query = [NSMutableDictionary dictionary];
+    [query setObject:(__bridge id)kSecClassGenericPassword forKey:(__bridge id)kSecClass];
+    [query setObject:key forKey:(__bridge id)kSecAttrAccount];
+    [query setObject:@YES forKey:(__bridge id)kSecReturnData];
+    [query setObject:(__bridge id)kSecMatchLimitOne forKey:(__bridge id)kSecMatchLimit];
+    
+    // 查询Keychain
+    CFTypeRef dataTypeRef = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &dataTypeRef);
+    
+    if (status == errSecSuccess && dataTypeRef) {
+        NSData *data = (__bridge_transfer NSData *)dataTypeRef;
+        return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    }
+    
+    return nil;
+}
+
+// 从Keychain删除项
+- (BOOL)deleteSecureItemForKey:(NSString *)key {
+    if (!key) return NO;
+    
+    // 准备查询字典
+    NSMutableDictionary *query = [NSMutableDictionary dictionary];
+    [query setObject:(__bridge id)kSecClassGenericPassword forKey:(__bridge id)kSecClass];
+    [query setObject:key forKey:(__bridge id)kSecAttrAccount];
+    
+    // 删除匹配项
+    OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+    return (status == errSecSuccess || status == errSecItemNotFound);
+}
+
+
+
+// 修改保存WiFi配置的方法
+- (void)saveWiFiConfigWithSsid:(NSString *_Nullable)wifiSsid password:(NSString *_Nullable)wifiPassword {
     if (wifiSsid.length == 0) {
         return;
     }
 
-    // 使用统一的 loadArrayForKey: 方法加载数据
+    // 加载现有配置
     NSMutableArray *wifiConfigs = [self loadArrayForKey:kWiFiConfigsKey];
     
-    // 创建新的配置字典
+    // 创建新配置，不包含密码
     NSDictionary *newConfig = @{
         @"ssid": wifiSsid,
-        @"password": wifiPassword ?: @""
+        @"hasPassword": wifiPassword.length > 0 ? @YES : @NO
     };
 
-    // 移除所有同名的旧配置
+    // 如有密码，存入Keychain
+    if (wifiPassword.length > 0) {
+        NSString *keychainKey = [NSString stringWithFormat:@"wifi_password_%@", wifiSsid];
+        [self saveSecureString:wifiPassword forKey:keychainKey];
+    }
+
+    // 移除同名旧配置
     [wifiConfigs filterUsingPredicate:
         [NSPredicate predicateWithBlock:^BOOL(NSDictionary *config, NSDictionary *bindings) {
             return ![config[@"ssid"] isEqualToString:wifiSsid];
         }]];
 
-    // 插入到数组开头
+    // 插入新配置
     [wifiConfigs insertObject:newConfig atIndex:0];
 
-    // 限制最大数量
+    // 限制配置数量
     if (wifiConfigs.count > kMaxConfigCount) {
+        // 清理多余配置的Keychain条目
+        NSDictionary *configToRemove = wifiConfigs.lastObject;
+        if ([configToRemove[@"hasPassword"] boolValue]) {
+            NSString *keychainKey = [NSString stringWithFormat:@"wifi_password_%@", configToRemove[@"ssid"]];
+            [self deleteSecureItemForKey:keychainKey];
+        }
         [wifiConfigs removeLastObject];
     }
 
-    // 使用统一的 saveArray:forKey: 方法保存 ✅ 修复了键名问题
+    // 保存配置
     [self saveArray:wifiConfigs forKey:kWiFiConfigsKey];
-    
-    NSLog(@"✅ Saved WiFi config: %@ (Count: %lu)", wifiSsid, (unsigned long)wifiConfigs.count);
 }
+
+// 修改获取WiFi配置的方法
 - (NSArray<NSDictionary<NSString *, NSString *> *> *)getWiFiConfigs {
-    return [self loadArrayForKey:kWiFiConfigsKey] ?: @[];
+    NSArray *savedConfigs = [self loadArrayForKey:kWiFiConfigsKey] ?: @[];
+    NSMutableArray *result = [NSMutableArray arrayWithCapacity:savedConfigs.count];
+    
+    for (NSDictionary *config in savedConfigs) {
+        NSString *ssid = config[@"ssid"];
+        NSString *password = @"";
+        
+        // 从Keychain获取密码
+        if ([config[@"hasPassword"] boolValue]) {
+            NSString *keychainKey = [NSString stringWithFormat:@"wifi_password_%@", ssid];
+            password = [self loadSecureStringForKey:keychainKey] ?: @"";
+        }
+        
+        // 创建包含密码的配置
+        [result addObject:@{
+            @"ssid": ssid,
+            @"password": password
+        }];
+    }
+    
+    return result;
 }
+
+
 
 // 雷达设备名称管理
 - (void)saveRadarDeviceName:(NSString *)name {

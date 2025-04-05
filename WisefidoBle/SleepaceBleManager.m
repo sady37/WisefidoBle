@@ -18,7 +18,7 @@
 #define DEFAULT_CONFIG_TIMEOUT 30.0
 #define DEFAULT_CONNECT_TIMEOUT 10.0
 #define DEFAULT_COMMAND_DELAY 1.0 // 延迟执行命令的时间
-#define DEFAULT_QUERY_TIMEOUT 20.0
+#define DEFAULT_QUERY_TIMEOUT 10.0
 
 
 @interface SleepaceBleManager ()
@@ -50,13 +50,14 @@
 @property (nonatomic, strong) NSTimer *scanTimer;
 @property (nonatomic, strong) NSTimer *configTimer;
 @property (nonatomic, strong) NSTimer *connectTimer;
+@property (nonatomic, strong) NSTimer *queryTimer;
 @property  SLPDeviceTypes deviceTypeEnum;
 
 
 // Private methods
 - (void)handleBluetoothStateChange:(NSNotification *)notification;
 - (void)handleDeviceDisconnected:(NSNotification *)notification;
-- (void)scanTimedOut;
+//- (void)scanTimedOut;
 - (void)connectionTimedOut;
 - (void)configurationTimedOut:(NSTimer *)timer;
 
@@ -66,6 +67,7 @@
 
 - (void)invalidateScanTimer;
 - (void)invalidateConfigTimer;
+- (void)invalidateQueryTimer;
 - (NSString *)getDeviceType:(NSString *)devicename ;
 - (SLPDeviceTypes)getSLPDeviceType:(NSString *)deviceTypeStr;
 
@@ -173,7 +175,7 @@
                 }               
                           
                 [strongSelf->_peripheralCache setObject:peripheral forKey:uuid]; // 不存在才存储
-                SLPLOG(@"Cached peripheral for UUID: %@", uuid);
+                SLPLOG(@"Cached peripheral for UUID");
             }
 
             // ===== 在这里添加详细日志 =====
@@ -181,9 +183,9 @@
             //SLPLOG(@"Peripheral: %@", peripheral);
             //SLPLOG(@"Peripheral name: %@", peripheral.name ?: @"nil");  
             //SLPLOG(@"Peripheral ID: %@", peripheral.identifier);
-            SLPLOG(@"Device name: %@", deviceName);
-            SLPLOG(@"Device type: %@", deviceType);
-            SLPLOG(@"Peripheral UUID: %@", peripheral.identifier.UUIDString);
+            //SLPLOG(@"Device name: %@", deviceName);
+            //SLPLOG(@"Device type: %@", deviceType);
+            //SLPLOG(@"Peripheral UUID: %@", peripheral.identifier.UUIDString);
 
             //SLPLOG(@"Peripheral state: %ld", (long)peripheral.state);
             //SLPLOG(@"PeripheralInfo name: %@", peripheralInfo.name ?: @"nil");
@@ -247,6 +249,7 @@
     // Stop scanning and timers
     [self stopScan];
     [self invalidateConfigTimer];
+    [self invalidateQueryTimer]; 
 }
 
 // CBCentralManagerDelegate 检测蓝牙状态变化
@@ -332,8 +335,21 @@
     [self startSDKScanWithTimeout:timeout];
  
 }
+
+- (void)invalidateScanTimer {
+    if (_scanTimer && [_scanTimer isValid]) {
+        [_scanTimer invalidate];
+        _scanTimer = nil;
+    }
+}
+
+
 - (void)stopScan {
-    SLPLOG(@"stopScan called");
+    if (!_isScanning) {
+    SLPLOG(@"No scan in progress, ignoring stop request");
+        return;
+    }
+    SLPLOG(@"SleepaceBle stopScan called");
     
     // 使用try-catch包装SDK调用，防止崩溃
     @try {
@@ -346,12 +362,19 @@
     
     // 无条件重置扫描状态
     _isScanning = NO;
+    if (_scanTimer && [_scanTimer isValid]) {
+        [_scanTimer invalidate];
+        _scanTimer = nil;
+        SLPLOG(@"Scan timer invalidated");
+    }
 
-    // 清理资源(添加一个小延时以确保安全)
+    //清理资源(添加一个小延时以确保安全)
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        SLPLOG(@"Scan stopped");
+        self->_scanCallback = nil;
+        SLPLOG(@"Sleepace Scan stopped");
     });
 }
+
 
 //扫描回调设置
 - (void)setScanCallback:(SleepaceScanCallback)callback {
@@ -506,70 +529,6 @@
     }
 }
 
-#pragma mark - Public Methods - Status Query
-
-- (void)queryDeviceStatus:(DeviceInfo *)deviceInfo
-               completion:(SleepaceStatusCallback)completion {
-    
-        // 检查 CBPeripheral 的 UUID 是否与 DeviceInfo 的 UUID 匹配
-        if ([self.currentPeripheral.identifier.UUIDString isEqualToString:deviceInfo.uuid]) {
-            // 打印日志
-            SLPLOG(@"Querying device status: %@ (UUID: %@)", deviceInfo.deviceName, deviceInfo.uuid);
-            // 创建 SLPDeviceTypes 对象，指定设备类型
-            SLPDeviceTypes deviceType = [self getSLPDeviceType:deviceInfo.deviceType]; //SLPDeviceType_BM8701_2;
-            // 查询设备 WiFi 连接状态
-            [_bleWifiConfig checkDeviceConnectWiFiStatus:self.currentPeripheral
-                                              deviceType:deviceType
-                                              completion:^(BOOL succeed, id data) {
-                BOOL success = NO;
-                
-                if (succeed && data && [data isKindOfClass:[SLPWiFiConnectStatus class]]) {
-                    SLPWiFiConnectStatus *wifiStatus = (SLPWiFiConnectStatus *)data;
-                    BOOL isConnected = wifiStatus.isConnected;
-                    
-                    SLPLOG(@"Device WiFi status query successful: %@, connection status: %@",
-                           deviceInfo.deviceName, isConnected ? @"Connected" : @"Disconnected");
-                    
-                    // 更新 DeviceInfo 的 WiFi 状态
-                    deviceInfo.wifiConnected = isConnected;
-                    deviceInfo.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
-                    
-                    success = YES;
-                } else {
-                    SLPLOG(@"Device WiFi status query failed: %@", deviceInfo.deviceName);
-                }
-                
-                // 通知主界面查询完成
-                if (completion) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        completion(deviceInfo, success);
-                    });
-                }
-            }];
-        } else {
-            // UUID 不匹配，返回查询失败
-            SLPLOG(@"Error: Peripheral UUID does not match DeviceInfo UUID");
-            if (completion) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    completion(deviceInfo, NO);
-                });
-            }
-        }
-    }
-
-
-#pragma mark - Private Methods - Timer Handlers
-
-- (void)connectionTimedOut {
-    SLPLOG(@"Connection timed out");
-    
-    if (_errorCallback) {
-        _errorCallback(SleepaceBleErrorConnectionTimeout, @"Connection to device timed out");
-    }
-    
-    [self disconnect];
-}
-
 - (void)configurationTimedOut:(NSTimer *)timer {
     SLPLOG(@"Configuration timed out");
     
@@ -590,24 +549,127 @@
     [self invalidateConfigTimer];
 }
 
-- (void)scanTimedOut {
-    SLPLOG(@"Scan timed out");
-    [self stopScan];
-}
-
-- (void)invalidateScanTimer {
-    if (_scanTimer && [_scanTimer isValid]) {
-        [_scanTimer invalidate];
-        _scanTimer = nil;
-    }
-}
-
 - (void)invalidateConfigTimer {
     if (_configTimer && [_configTimer isValid]) {
         [_configTimer invalidate];
         _configTimer = nil;
     }
 }
+
+
+#pragma mark - Public Methods - Query Device Status
+- (void)queryDeviceStatus:(DeviceInfo *)deviceInfo completion:(SleepaceStatusCallback)completion {
+    // 检查设备连接状态
+    if (!_currentPeripheral) {
+        SLPLOG(@"Error: No peripheral available");
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(deviceInfo, NO);
+            });
+        }
+        return;
+    }
+    else if (![_currentPeripheral.identifier.UUIDString isEqualToString:deviceInfo.uuid]) {
+        SLPLOG(@"Error: Peripheral UUID mismatch (Current: %@, Expected: %@)",
+              _currentPeripheral.identifier.UUIDString,
+              deviceInfo.uuid);
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(deviceInfo, NO);
+            });
+        }
+        return;
+    }
+    else if (_currentPeripheral.state != CBPeripheralStateConnected) {
+        SLPLOG(@"Error: Peripheral not connected (State: %ld)", (long)_currentPeripheral.state);
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(deviceInfo, NO);
+            });
+        }
+        return;
+    }
+    
+    SLPLOG(@"Querying device status: %@ (UUID: %@)", deviceInfo.deviceName, deviceInfo.uuid);
+    
+    // 确定设备类型
+    SLPDeviceTypes deviceType = [self getSLPDeviceType:deviceInfo.deviceType];
+    SLPLOG(@"Device type for query: %ld", (long)deviceType);
+    
+    // 取消之前的查询计时器
+    [self invalidateQueryTimer];
+    
+    // 设置新的查询超时计时器 - 修复类型错误
+    _queryTimer = [NSTimer scheduledTimerWithTimeInterval:DEFAULT_QUERY_TIMEOUT
+                                                   target:self
+                                                 selector:@selector(handleQueryTimeout:)
+                                                 userInfo:@{@"completion": completion ? [completion copy] : [NSNull null],
+                                                            @"device": deviceInfo}
+                                                  repeats:NO];
+    
+    // 执行查询
+    SLPLOG(@"Executing WiFi status check for device: %@", deviceInfo.deviceName);
+    [_bleWifiConfig checkDeviceConnectWiFiStatus:_currentPeripheral
+                                      deviceType:deviceType
+                                      completion:^(BOOL succeed, id data) {
+        // 取消查询计时器
+        [self invalidateQueryTimer];
+        
+        BOOL success = NO;
+        if (succeed && data && [data isKindOfClass:[SLPWiFiConnectStatus class]]) {
+            SLPWiFiConnectStatus *wifiStatus = (SLPWiFiConnectStatus *)data;
+            BOOL isConnected = wifiStatus.isConnected;
+            
+            SLPLOG(@"Device WiFi status query successful: %@, connection status: %@",
+                  deviceInfo.deviceName, isConnected ? @"Connected" : @"Disconnected");
+            
+            deviceInfo.wifiConnected = isConnected;
+            deviceInfo.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
+            
+            success = YES;
+        } else {
+            SLPLOG(@"Device WiFi status query failed");
+        }
+        
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(deviceInfo, success);
+            });
+        }
+    }];
+}
+
+// 查询超时计时器管理
+- (void)invalidateQueryTimer {
+    if (_queryTimer && [_queryTimer isValid]) {
+        [_queryTimer invalidate];
+        _queryTimer = nil;
+        SLPLOG(@"Query timer invalidated");
+    }
+}
+
+// 处理查询超时，保留断开连接逻辑
+- (void)handleQueryTimeout:(NSTimer *)timer {
+    NSDictionary *userInfo = timer.userInfo;
+    id completionObj = userInfo[@"completion"];
+    DeviceInfo *deviceInfo = userInfo[@"device"];
+    
+    SLPLOG(@"Device status query timed out");
+    
+    // 主动断开连接，避免后续操作受影响
+    //[self disconnect];
+    
+    // 确保计时器被清理
+    [self invalidateQueryTimer];
+    
+    if (completionObj && completionObj != [NSNull null]) {
+        SleepaceStatusCallback completion = (SleepaceStatusCallback)completionObj;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(deviceInfo, NO);
+        });
+    }
+}
+
 
 #pragma mark - Private Methods - Bluetooth State Change
 
@@ -655,7 +717,118 @@
     _currentDeviceUUID = nil;
 }
 
-#pragma mark - Private Methods - Device Management
+#pragma mark - Public Methods - connectDevice/Disconnect
+/**
+ * 准备使用设备 - 从缓存获取peripheral对象
+ * 注意：此方法不实际建立BLE连接，而是获取peripheral对象供后续使用
+ * @param device 设备信息
+ */
+- (void)connectDevice:(DeviceInfo *)device {
+    if (!device || !device.uuid) {
+        SLPLOG(@"Error: Invalid device or missing UUID");
+        return;
+    }
+    
+    //SLPLOG(@"Connecting to device: %@, UUID: %@", device.deviceName, device.uuid);
+    
+    // 保存设备信息
+    _currentDevice = device;
+    _currentDeviceUUID = device.uuid;
+    
+    // 从缓存中查找peripheral
+    CBPeripheral *peripheral = nil;
+    @synchronized(_peripheralCache) {
+        peripheral = [_peripheralCache objectForKey:device.uuid];
+    }
+    
+    if (peripheral) {
+        //SLPLOG(@"Found peripheral for UUID: %@", device.uuid);
+        _currentPeripheral = peripheral;
+        _isConnected = YES; 
+    } else {
+        //SLPLOG(@"Warning: No peripheral found for UUID: %@", device.uuid);
+        _currentPeripheral = nil;
+    }
+}
+
+- (void)connectionTimedOut {
+    SLPLOG(@"Connection timed out");
+    
+    if (_errorCallback) {
+        _errorCallback(SleepaceBleErrorConnectionTimeout, @"Connection to device timed out");
+    }
+    
+    [self disconnect];
+}
+
+- (void)invalidateConnectTimer {
+    if (_connectTimer && [_connectTimer isValid]) {
+        [_connectTimer invalidate];
+        _connectTimer = nil;
+    }
+}
+
+- (void)disconnect {
+    SLPLOG(@"Disconnecting device");
+    
+    // 先调用SDK的断开连接方法 
+    if (_currentPeripheral) {
+        // 使用SDK的断开连接方法
+        SLPLOG(@"Calling SDK disconnect");
+        [[SLPBLEManager sharedBLEManager] disconnectPeripheral:_currentPeripheral 
+                                                      timeout:2.0
+                                                   completion:^(SLPBLEDisconnectReturnCodes code, NSInteger disconnectHandleID) {
+            SLPLOG(@"SDK disconnect completed with code: %ld", (long)code);
+        }];
+    }
+    
+    // 清理资源
+    _currentDevice = nil;
+    _currentDeviceUUID = nil;
+    _currentPeripheral = nil;
+    
+    // 取消所有定时器
+    [_scanTimer invalidate];
+    [_configTimer invalidate];
+    [_connectTimer invalidate];
+    
+    _scanTimer = nil;
+    _configTimer = nil;
+    _connectTimer = nil;
+    
+    // 重置状态
+    _isConnected = NO;
+    _isConfiguring = NO;
+    
+    SLPLOG(@"Device disconnected");
+}
+
+
+// 根据UUID获取peripheral对象
+- (void)setCurrentDevice:(DeviceInfo *)device {
+    if (!device || !device.uuid) {
+        SLPLOG(@"Error: Invalid device information");
+        return;
+    }
+    
+    // 保存设备信息
+    _currentDevice = device;
+    _currentDeviceUUID = device.uuid;
+    
+    // 从缓存查找peripheral
+    CBPeripheral *peripheral = nil;
+    @synchronized(_peripheralCache) {
+        peripheral = [_peripheralCache objectForKey:device.uuid];
+    }
+    
+    if (peripheral) {
+        //SLPLOG(@"Found peripheral for device: %@, UUID: %@", device.deviceName, device.uuid);
+        _currentPeripheral = peripheral;
+    } else {
+        //SLPLOG(@"Warning: No peripheral found for device UUID: %@", device.uuid);
+        _currentPeripheral = nil;
+    }
+}
 
 #pragma mark - Private Methods - Utility
 
@@ -723,101 +896,6 @@
             return [NSString stringWithFormat:@"Unknown Type (%ld)", (long)typeCode];
     }
 }
-#pragma mark - Public Methods - connectDevice/Disconnect
-/**
- * 准备使用设备 - 从缓存获取peripheral对象
- * 注意：此方法不实际建立BLE连接，而是获取peripheral对象供后续使用
- * @param device 设备信息
- */
-- (void)connectDevice:(DeviceInfo *)device {
-    if (!device || !device.uuid) {
-        SLPLOG(@"Error: Invalid device or missing UUID");
-        return;
-    }
-    
-    SLPLOG(@"Connecting to device: %@, UUID: %@", device.deviceName, device.uuid);
-    
-    // 保存设备信息
-    _currentDevice = device;
-    _currentDeviceUUID = device.uuid;
-    
-    // 从缓存中查找peripheral
-    CBPeripheral *peripheral = nil;
-    @synchronized(_peripheralCache) {
-        peripheral = [_peripheralCache objectForKey:device.uuid];
-    }
-    
-    if (peripheral) {
-        SLPLOG(@"Found peripheral for UUID: %@", device.uuid);
-        _currentPeripheral = peripheral;
-        _isConnected = YES; 
-    } else {
-        SLPLOG(@"Warning: No peripheral found for UUID: %@", device.uuid);
-        _currentPeripheral = nil;
-    }
-}
-
-- (void)disconnect {
-    SLPLOG(@"Disconnecting device");
-    
-    // 先调用SDK的断开连接方法 
-    if (_currentPeripheral) {
-        // 使用SDK的断开连接方法
-        SLPLOG(@"Calling SDK disconnect for peripheral: %@", _currentPeripheral.identifier.UUIDString);
-        [[SLPBLEManager sharedBLEManager] disconnectPeripheral:_currentPeripheral 
-                                                      timeout:2.0
-                                                   completion:^(SLPBLEDisconnectReturnCodes code, NSInteger disconnectHandleID) {
-            SLPLOG(@"SDK disconnect completed with code: %ld", (long)code);
-        }];
-    }
-    
-    // 清理资源
-    _currentDevice = nil;
-    _currentDeviceUUID = nil;
-    _currentPeripheral = nil;
-    
-    // 取消所有定时器
-    [_scanTimer invalidate];
-    [_configTimer invalidate];
-    [_connectTimer invalidate];
-    
-    _scanTimer = nil;
-    _configTimer = nil;
-    _connectTimer = nil;
-    
-    // 重置状态
-    _isConnected = NO;
-    _isConfiguring = NO;
-    
-    SLPLOG(@"Device disconnected");
-}
-
-// 根据UUID获取peripheral对象
-- (void)setCurrentDevice:(DeviceInfo *)device {
-    if (!device || !device.uuid) {
-        SLPLOG(@"Error: Invalid device information");
-        return;
-    }
-    
-    // 保存设备信息
-    _currentDevice = device;
-    _currentDeviceUUID = device.uuid;
-    
-    // 从缓存查找peripheral
-    CBPeripheral *peripheral = nil;
-    @synchronized(_peripheralCache) {
-        peripheral = [_peripheralCache objectForKey:device.uuid];
-    }
-    
-    if (peripheral) {
-        SLPLOG(@"Found peripheral for device: %@, UUID: %@", device.deviceName, device.uuid);
-        _currentPeripheral = peripheral;
-    } else {
-        SLPLOG(@"Warning: No peripheral found for device UUID: %@", device.uuid);
-        _currentPeripheral = nil;
-    }
-}
-
 
 // 查询WiFi状态 当前仅支持EW02
 - (void)checkWiFiStatus:(CBPeripheral *)bleDevice 
