@@ -127,7 +127,7 @@
 //BlufiClient lazy 
 - (BlufiClient *)blufiClient {
     if (!_blufiClient && _currentDevice) {
-        RDRLOG("Lazy initializing BlufiClient for device: ");
+        //RDRLOG("Lazy initializing BlufiClient for device: ");
         
         _blufiClient = [[BlufiClient alloc] init];
         // 保留必要的代理设置
@@ -149,7 +149,7 @@
 
 - (void)_cleanupBlufiClient {
     if (_blufiClient) {
-        RDRLOG("Releasing BlufiClient instance");
+        //RDRLOG("Releasing BlufiClient instance");
         [_blufiClient close];
         _blufiClient = nil;
         _isConnected = NO;
@@ -158,7 +158,7 @@
 
 // 资源释放方法
 - (void)dealloc {
-    RDRLOG(@"Releasing RadarBleManager resources");
+    //RDRLOG(@"Releasing RadarBleManager resources");
     
     // 停止所有操作
     [self stopScan];
@@ -186,7 +186,7 @@
 // 设置错误回调
 - (void)setErrorCallback:(void (^)(RadarBleErrorType, NSString *))callback {
     _errorCallback = callback;
-    RDRLOG(@"Error callback set successfully");
+    //RDRLOG(@"Error callback set successfully");
 }
 
 // 重置错误计数
@@ -197,7 +197,7 @@
 // 根据UUID获取peripheral对象
 - (void)setCurrentDevice:(DeviceInfo *)device {
     if (!device || !device.uuid) {
-        RDRLOG(@"Error: Invalid device information");
+        //RDRLOG(@"Error: Invalid device information");
         if (_errorCallback) {
             _errorCallback(RadarBleErrorInvalidParameter, @"Invalid device information");
         }
@@ -206,7 +206,7 @@
     
     // Check if already connected to this device
     if (_isConnected && _currentDevice && [_currentDevice.uuid isEqualToString:device.uuid]) {
-        RDRLOG(@"Already connected to device");
+        //RDRLOG(@"Already connected to device");
         return;
     }
     // If connected to different device, disconnect first
@@ -232,7 +232,7 @@
  */
 - (void)connectDevice:(DeviceInfo *)device {
     if (!device || !device.uuid) {
-        RDRLOG(@"Error: Invalid device information");
+        //RDRLOG(@"Error: Invalid device information");
         if (_errorCallback) {
             _errorCallback(RadarBleErrorInvalidParameter, @"Invalid device information");
         }
@@ -241,7 +241,7 @@
     
     // Check if already connected to this device
     if (_isConnected && _currentDevice && [_currentDevice.uuid isEqualToString:device.uuid]) {
-        RDRLOG(@"Already connected to device");
+        //RDRLOG(@"Already connected to device");
         return;
     }
     
@@ -257,7 +257,7 @@
     // Access blufiClient through lazy getter to establish connection
     [self blufiClient];
 
-    RDRLOG(@"Connecting to device");
+    //RDRLOG(@"Connecting to device");
     
     // 设置连接超时
     _connectTimer = [NSTimer scheduledTimerWithTimeInterval:DEFAULT_CONNECT_TIMEOUT
@@ -271,14 +271,14 @@
 }
 
   - (void)disconnect {
-      RDRLOG(@"Disconnecting device");
+      //RDRLOG(@"Disconnecting device");
 
       // 清理 BlufiClient
       if (_blufiClient) {
           @try {
               [_blufiClient close];
           } @catch (NSException *exception) {
-              RDRLOG(@"Exception during blufiClient close: %@", exception);
+              //RDRLOG(@"Exception during blufiClient close: %@", exception);
           }
           _blufiClient = nil;
       }
@@ -316,7 +316,7 @@
   }
 
 - (void)connectionTimedOut {
-    RDRLOG(@"Connection timed out for device");
+    //RDRLOG(@"Connection timed out for device");
     
     // 通知错误回调
     if (_errorCallback) {
@@ -341,7 +341,7 @@
     _connectTimer = nil;
     
     if (status == StatusSuccess) {
-        RDRLOG(@"BluFi GATT prepared successfully with service");
+        //RDRLOG(@"BluFi GATT prepared successfully with service");
         _isConnected = YES;
         
         // 如果正在查询，自动开始安全协商
@@ -362,7 +362,7 @@
             errorMsg = @"Failed to discover Blufi notify characteristic";
         }
         
-        RDRLOG(@"%@: %d", errorMsg, status);
+        //RDRLOG(@"%@: %d", errorMsg, status);
         
         if (_queryCallback) {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -381,7 +381,7 @@
 // 设置扫描回调
 - (void)setScanCallback:(RadarScanCallback)callback {
     _scanCallback = callback;
-    RDRLOG(@"Scan callback set successfully");
+    //RDRLOG(@"Scan callback set successfully");
 }
 
 // 开始扫描，使用默认参数
@@ -396,7 +396,7 @@
                filterPrefix:(nullable NSString *)filterPrefix 
                  filterType:(FilterType)filterType {
     if (_isScanning) {
-        RDRLOG(@"Scan already in progress, ignoring request");
+        //RDRLOG(@"Scan already in progress, ignoring request");
         return;
     }
         // 保存过滤参数
@@ -405,13 +405,13 @@
     
     // 检查蓝牙状态
     if (_centralManager.state != CBManagerStatePoweredOn) {
-        RDRLOG(@"Bluetooth not enabled, delay rescan");
+        //RDRLOG(@"Bluetooth not enabled, delay rescan");
         __weak typeof(self) weakSelf = self;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
                         if (!strongSelf) return;
             if (strongSelf.centralManager.state == CBManagerStatePoweredOn) {
-                RDRLOG(@"after delay ble is ready,start  scan");
+                //RDRLOG(@"after delay ble is ready,start  scan");
                 [strongSelf startActualScan:timeout];
             } else {
                 if (strongSelf.errorCallback) {
@@ -428,7 +428,7 @@
     
 // 实际开始扫描的内部方法
 - (void)startActualScan:(NSTimeInterval)timeout {
-    RDRLOG(@"Starting scan: timeout=%.1fs",timeout);
+    //RDRLOG(@"Starting scan: timeout=%.1fs",timeout);
     
     // 设置扫描标志
     _isScanning = YES;
@@ -451,7 +451,7 @@
         return;
     }
     
-    RDRLOG(@"Stopping scan");
+    //RDRLOG(@"Stopping scan");
     
     // 停止蓝牙扫描
     [_centralManager stopScan];
@@ -466,7 +466,7 @@
 
 // 扫描超时处理
 - (void)scanTimedOut {
-    RDRLOG(@"Scan timed out");
+    //RDRLOG(@"Scan timed out");
     [self stopScan];
 }
 
@@ -474,7 +474,7 @@
 
 // 蓝牙状态变化回调
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central {
-    RDRLOG(@"Bluetooth state updated: %ld", (long)central.state);
+    //RDRLOG(@"Bluetooth state updated: %ld", (long)central.state);
     
     // 蓝牙关闭时停止扫描
     if (central.state != CBManagerStatePoweredOn && _isScanning) {
@@ -524,16 +524,16 @@
             return; // 已存在则跳过
         }
         strongSelf->_peripheralCache[uuid] = peripheral; // 不存在才存储
-        //RDRLOG(@"Cached peripheral for UUID: %@", uuid);
+        ////RDRLOG(@"Cached peripheral for UUID: %@", uuid);
     }
 
     // 打印详细日志
-    //RDRLOG(@"设备信息:");
-    //RDRLOG(@"Peripheral: %@", peripheral);
-    //RDRLOG(@"Peripheral name: %@", peripheral.name ?: @"nil");
-    //RDRLOG(@"Peripheral ID: %@", peripheral.identifier);
-    //RDRLOG(@"Peripheral state: %ld", (long)peripheral.state);
-    //RDRLOG(@"RSSI: %@", RSSI);
+    ////RDRLOG(@"设备信息:");
+    ////RDRLOG(@"Peripheral: %@", peripheral);
+    ////RDRLOG(@"Peripheral name: %@", peripheral.name ?: @"nil");
+    ////RDRLOG(@"Peripheral ID: %@", peripheral.identifier);
+    ////RDRLOG(@"Peripheral state: %ld", (long)peripheral.state);
+    ////RDRLOG(@"RSSI: %@", RSSI);
     
     // 创建设备信息对象
     DeviceInfo *deviceInfo = [[DeviceInfo alloc] initWithProductorName:ProductorRadarQL
@@ -572,11 +572,11 @@
                wifiSsid:(nullable NSString *)wifiSsid
            wifiPassword:(nullable NSString *)wifiPassword
              completion:(RadarConfigCallback)completion {
-    RDRLOG(@"Starting device configuration");
+    //RDRLOG(@"Starting device configuration");
     
     // 参数验证
     if (!device || !device.uuid) {
-        RDRLOG(@"Error: Invalid device information");
+        //RDRLOG(@"Error: Invalid device information");
         if (completion) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(NO, @{@"error": @"Invalid device information"});
@@ -610,7 +610,7 @@
     
     if (!isDeviceConnected) {
         // 设备未连接，先连接设备
-        RDRLOG(@"Device not connected, connecting first...");
+        //RDRLOG(@"Device not connected, connecting first...");
         
         [self connectDevice:device];
         
@@ -621,16 +621,16 @@
                 [self->_blufiClient negotiateSecurity];
                 
                 // 等待安全协商完成，在回调中继续执行配置
-                RDRLOG(@"Waiting for security negotiation to complete...");
+                //RDRLOG(@"Waiting for security negotiation to complete...");
             } else {
                 // 连接失败
-                RDRLOG(@"Failed to connect to device");
+                //RDRLOG(@"Failed to connect to device");
                 [self configurationDidFailWithError:@"Failed to connect to device"];
             }
         });
     } else {
         // 设备已连接，直接进行安全协商
-        RDRLOG(@"Device already connected, proceeding with security negotiation...");
+        //RDRLOG(@"Device already connected, proceeding with security negotiation...");
         [_blufiClient negotiateSecurity];
     }
     
@@ -640,7 +640,7 @@
  * 安全协商结果回调 - 继续执行配置流程
  */
 - (void)blufi:(BlufiClient *)client didNegotiateSecurity:(BlufiStatusCode)status {
-    RDRLOG(@"Security negotiation result: %d", status);
+    //RDRLOG(@"Security negotiation result: %d", status);
     
     if (status != StatusSuccess) {
         // 安全协商失败
@@ -648,7 +648,7 @@
         
         if (_errorCount < 2 && _isConfiguring) {
             // 最多重试一次
-            RDRLOG(@"Security negotiation failed, retrying once...");
+            //RDRLOG(@"Security negotiation failed, retrying once...");
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [client negotiateSecurity];
             });
@@ -691,7 +691,7 @@
  * 发送WiFi配置
  */
 - (void)sendWifiConfiguration {
-    RDRLOG(@"Sending WiFi configuration: SSID=%@", _wifiSsid);
+    //RDRLOG(@"Sending WiFi configuration: SSID=%@", _wifiSsid);
     
     // 创建配置参数对象
     BlufiConfigureParams *params = [[BlufiConfigureParams alloc] init];
@@ -714,7 +714,7 @@
         return;
     }
     
-    RDRLOG(@"Sending server configuration: %@:%ld", _serverAddress, (long)_serverPort);
+    //RDRLOG(@"Sending server configuration: %@:%ld", _serverAddress, (long)_serverPort);
     
     // 创建结果字典
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
@@ -727,7 +727,7 @@
     
     if (data) {
         [_blufiClient postCustomData:data];
-        RDRLOG(@"Server address command sent");
+        //RDRLOG(@"Server address command sent");
         
         // 延迟发送端口命令（等待地址命令处理完成）
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -737,18 +737,18 @@
             
             if (portData) {
                 [self->_blufiClient postCustomData:portData];
-                RDRLOG(@"Server port command sent");
+                //RDRLOG(@"Server port command sent");
                 
                 // 延迟发送其他命令
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     // 发送额外命令
                     [self->_blufiClient postCustomData:[@"3:0" dataUsingEncoding:NSUTF8StringEncoding]];
-                    RDRLOG(@"Extra command sent");
+                    //RDRLOG(@"Extra command sent");
                     
                     // 最后发送重启命令
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         [self->_blufiClient postCustomData:[@"8:" dataUsingEncoding:NSUTF8StringEncoding]];
-                        RDRLOG(@"Restart command sent");
+                        //RDRLOG(@"Restart command sent");
                         
                         // 假设命令都已成功发送，等待设备重启
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -792,7 +792,7 @@
     [result setObject:@(success) forKey:@"success"];
     
     if (success) {
-        RDRLOG(@"WiFi configuration successful");
+        //RDRLOG(@"WiFi configuration successful");
         
         // 设置成功信息
         if (_serverAddress && _serverPort > 0) {
@@ -839,7 +839,7 @@
         }
     } else {
         // 配置失败
-        RDRLOG(@"WiFi configuration failed: %d", status);
+        //RDRLOG(@"WiFi configuration failed: %d", status);
         [result setObject:[NSString stringWithFormat:@"WiFi configuration failed: %d", status] forKey:@"error"];
         
         // 通知主界面
@@ -860,7 +860,7 @@
  * 配置失败处理
  */
 - (void)configurationDidFailWithError:(NSString *)error {
-    RDRLOG(@"Configuration failed: %@", error);
+    //RDRLOG(@"Configuration failed: %@", error);
     
     // 取消超时计时器
     [_configTimer invalidate];
@@ -897,11 +897,11 @@
  */
 - (void)queryDeviceStatus:(DeviceInfo *)device
               completion:(void(^)(DeviceInfo *updatedDevice, BOOL success))completion {
-    //RDRLOG(@"Start querying device status for: %@, UUID: %@", device.deviceName, device.uuid);
+    ////RDRLOG(@"Start querying device status for: %@, UUID: %@", device.deviceName, device.uuid);
     
     // 参数验证
     if (!device || !device.uuid) {
-        RDRLOG(@"Error: Invalid device information");
+        //RDRLOG(@"Error: Invalid device information");
         if (completion) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion(device, NO);
@@ -933,21 +933,21 @@
     // 如果已连接到该设备，直接开始安全协商
     if (_isConnected && _blufiClient && 
         [_currentDevice.uuid isEqualToString:device.uuid]) {
-        RDRLOG(@"Device already connected, proceeding with security negotiation...");
+        //RDRLOG(@"Device already connected, proceeding with security negotiation...");
         
         // 注意：延迟调用安全协商，确保特征已就绪
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             @try {
                 [self->_blufiClient negotiateSecurity];
             } @catch (NSException *exception) {
-                RDRLOG(@"negotiateSecurity exception: %@", exception.reason);
+                //RDRLOG(@"negotiateSecurity exception: %@", exception.reason);
                 // 连接可能已失效，需要重新连接
                 [self connectDevice:device];
             }
         });
     } else {
         // 需要重新连接设备
-        RDRLOG(@"Device not connected, connecting first...");
+        //RDRLOG(@"Device not connected, connecting first...");
         [self connectDevice:device];
         // 注意：连接成功后的安全协商会在 gattPrepared 回调中处理
     }
@@ -957,20 +957,20 @@
  * 查询超时处理 
  */
 - (void)queryTimedOut {
-    RDRLOG(@"Query operation timed out");
+    //RDRLOG(@"Query operation timed out");
     
     // 如果查询正在进行且未完成
     if (!_isQueryComplete) {
-        RDRLOG(@"Query timeout, checking partial results...");
+        //RDRLOG(@"Query timeout, checking partial results...");
         
         // 检查是否有部分数据可用
         BOOL hasPartialData = (_hasUID || _hasMacAddress || _hasWifiStatus);
         
         if (hasPartialData) {
-            //RDRLOG(@"Some data available (UID:%d, MAC:%d, WiFi:%d), returning partial results",_hasUID, _hasMacAddress, _hasWifiStatus);
+            ////RDRLOG(@"Some data available (UID:%d, MAC:%d, WiFi:%d), returning partial results",_hasUID, _hasMacAddress, _hasWifiStatus);
             [self finishQuery:YES]; // 返回部分数据
         } else {
-            RDRLOG(@"No data available, query failed");
+            //RDRLOG(@"No data available, query failed");
             [self finishQuery:NO]; // 完全失败
         }
     }
@@ -984,7 +984,7 @@
  * 发送UID查询命令
  */
 - (void)sendUIDQuery {
-    RDRLOG(@"Sending UID query command");
+    //RDRLOG(@"Sending UID query command");
     NSData *uidCmd = [@"12:" dataUsingEncoding:NSUTF8StringEncoding];
     [_blufiClient postCustomData:uidCmd];
 }
@@ -993,7 +993,7 @@
  * 发送MAC地址查询命令
  */
 - (void)sendMACQuery {
-    RDRLOG(@"Sending MAC address query command");
+    //RDRLOG(@"Sending MAC address query command");
     NSData *macCmd = [@"65:" dataUsingEncoding:NSUTF8StringEncoding];
     [_blufiClient postCustomData:macCmd];
 }
@@ -1002,7 +1002,7 @@
  * 发送 WiFi 状态查询命令 - 使用 ESP SDK 标准方法
  */
 - (void)sendWiFiStatusQuery {
-    RDRLOG(@"Requesting device WiFi status using standard BluFi method");
+    //RDRLOG(@"Requesting device WiFi status using standard BluFi method");
     [_blufiClient requestDeviceStatus];
     // 结果将在 didReceiveDeviceStatusResponse 回调中处理
     
@@ -1076,14 +1076,14 @@
         [_statusMap setObject:uid forKey:@"uid"];
         _hasUID = YES;
         
-        RDRLOG(@"Received device UID");
+        //RDRLOG(@"Received device UID");
         
         // 继续查询MAC地址
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self sendMACQuery];
         });
     } else {
-        RDRLOG(@"Invalid UID response format");
+        //RDRLOG(@"Invalid UID response format");
         
         // 继续查询MAC地址，不中断流程
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1105,14 +1105,14 @@
         [_statusMap setObject:macAddress forKey:@"macAddress"];
         _hasMacAddress = YES;
         
-        RDRLOG(@"Received device MAC address");
+        //RDRLOG(@"Received device MAC address");
         
         // 继续查询WiFi状态
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self sendWiFiStatusQuery];
         });
     } else {
-        RDRLOG(@"Invalid MAC address response format");
+        //RDRLOG(@"Invalid MAC address response format");
         
         // 继续查询WiFi状态，不中断流程
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1151,12 +1151,12 @@
         
         _hasWifiStatus = YES;
         
-        RDRLOG(@"Received WiFi status: mode=%@, connected=%d, SSID=%@", wifiMode, connected, ssid ?: @"Unknown");
+        //RDRLOG(@"Received WiFi status: mode=%@, connected=%d, SSID=%@", wifiMode, connected, ssid ?: @"Unknown");
         
         // 查询完成，通知结果
         [self finishQuery:YES];
     } else {
-        RDRLOG(@"Invalid WiFi status response format");
+        //RDRLOG(@"Invalid WiFi status response format");
         
         // 查询不完整，但仍然返回结果
         [self finishQuery:(_hasUID || _hasMacAddress)];
@@ -1167,7 +1167,7 @@
  * 处理 WiFi 状态查询结果
  */
 - (void)handleWiFiStatusResponse:(NSString *)wifiMode connected:(BOOL)connected ssid:(NSString *)ssid {
-    RDRLOG(@"Received WiFi status: mode=%@, connected=%d, SSID=%@", wifiMode, connected, ssid);
+    //RDRLOG(@"Received WiFi status: mode=%@, connected=%d, SSID=%@", wifiMode, connected, ssid);
     _currentDevice.wifiMode = wifiMode;
     _currentDevice.wifiConnected = connected;
     _currentDevice.wifiSsid = ssid;
@@ -1175,7 +1175,7 @@
     // 所有查询完成，回调结果
     if (_queryCallback) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            RDRLOG(@"Query completed, notifying main thread.");
+            //RDRLOG(@"Query completed, notifying main thread.");
             self->_queryCallback(self->_currentDevice, YES);
             self->_queryCallback = nil;
         });
@@ -1183,7 +1183,7 @@
     
     // 断开连接
     //[self disconnect];
-	RDRLOG(@"Query completed, keeping connection active until timeout.");
+	//RDRLOG(@"Query completed, keeping connection active until timeout.");
 }
 
 /**
@@ -1191,7 +1191,7 @@
  */
 - (void)blufi:(BlufiClient *)client didReceiveCustomData:(NSData *)data status:(BlufiStatusCode)status {
     if (status != StatusSuccess || !data) {
-        RDRLOG(@"Failed to receive custom data: status=%d", status);
+        //RDRLOG(@"Failed to receive custom data: status=%d", status);
 
         // 如果是状态查询失败，通知查询失败
         if (_queryCallback && !_isQueryComplete) {
@@ -1202,11 +1202,11 @@
 
     // 将接收到的数据转换为字符串
     NSString *responseStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    RDRLOG(@"Received custom data: %@", responseStr);
+    //RDRLOG(@"Received custom data: %@", responseStr);
 
     // 检查响应是否包含分隔符 ":"
     if (![responseStr containsString:@":"]) {
-        RDRLOG(@"Invalid response format: missing separator ':'");
+        //RDRLOG(@"Invalid response format: missing separator ':'");
         return;
     }
 
@@ -1243,13 +1243,13 @@
         case 8:  // 重启命令响应
             // 服务器配置相关响应
             if (_isConfiguring) {
-                RDRLOG(@"Received server configuration response: command=%ld, result=%@", 
-                    (long)command, parts.count > 1 ? parts[1] : @"unknown");
+                //RDRLOG(@"Received server configuration response: command=%ld, result=%@", 
+                    //(long)command, parts.count > 1 ? parts[1] : @"unknown");
             }
             break;
             
         default:
-            RDRLOG(@"Unknown command response: %ld", (long)command);
+            //RDRLOG(@"Unknown command response: %ld", (long)command);
             break;
     }
 }
@@ -1261,7 +1261,7 @@
  * 设备状态响应回调 - ESP 标准 WiFi 状态查询
  */
 - (void)blufi:(BlufiClient *)client didReceiveDeviceStatusResponse:(nullable BlufiStatusResponse *)response status:(BlufiStatusCode)status {
-    RDRLOG(@"Received device status response: %d", status);
+    //RDRLOG(@"Received device status response: %d", status);
     
     if (_queryCallback && !_isQueryComplete) {
         if (status == StatusSuccess && response) {
@@ -1304,12 +1304,10 @@
                     [_statusMap setObject:response.staBssid forKey:@"staBSSID"];
                 }
                 
-                RDRLOG(@"STA Mode: connected=%@, SSID=%@", 
-                      isConnected ? @"YES" : @"No", 
-                      response.staSsid ?: @"unknow");
+                //RDRLOG(@"STA Mode: connected=%@, SSID=%@", isConnected ? @"YES" : @"No", response.staSsid ?: @"unknow");
             }
             
-            // AP 模式信息
+            // AP 模式信息∫
             if (response.opMode == OpModeSoftAP || response.opMode == OpModeStaSoftAP) {
                 if (response.softApSsid) {
                     [_statusMap setObject:response.softApSsid forKey:@"apSSID"];
@@ -1329,7 +1327,7 @@
             // WiFi 状态查询失败
             [_statusMap setObject:@"Failed to get status" forKey:@"wifiError"];
             
-            RDRLOG(@"Failed to get device WiFi status: %d", status);
+            //RDRLOG(@"Failed to get device WiFi status: %d", status);
             
             // 查询不完整，但仍然尝试返回部分结果
             [self finishQuery:(_hasUID || _hasMacAddress)];
@@ -1341,14 +1339,14 @@
  * 发送自定义数据结果回调
  */
 - (void)blufi:(BlufiClient *)client didPostCustomData:(NSData *)data status:(BlufiStatusCode)status {
-    RDRLOG(@"Post custom data result: %d", status);
+    //RDRLOG(@"Post custom data result: %d", status);
     
     if (status != StatusSuccess && _isConfiguring ) {
         // 发送失败，尝试重试
         _configRetryCount++;
         
     if (_configRetryCount < 3 && _isConfiguring) {
-        RDRLOG(@"Command failed, retry count: %ld", (long)_configRetryCount);
+        //RDRLOG(@"Command failed, retry count: %ld", (long)_configRetryCount);
         
         // 可以添加一个简单的重试逻辑，如再次调用 sendServerConfiguration
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1368,13 +1366,13 @@
  * 错误回调
  */
 - (void)blufi:(BlufiClient *)client didReceiveError:(NSInteger)errCode {
-    RDRLOG(@"Received error: %ld", (long)errCode);
+    //RDRLOG(@"Received error: %ld", (long)errCode);
     
     _errorCount++;
     
     // 状态查询处理
     if (_queryCallback) {
-        RDRLOG(@"Query failed: Communication error: %ld", (long)errCode);
+        //RDRLOG(@"Query failed: Communication error: %ld", (long)errCode);
         dispatch_async(dispatch_get_main_queue(), ^{
             self->_queryCallback(self->_currentDevice, NO);
         });
@@ -1426,27 +1424,27 @@
 
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error {
     if (error) {
-        RDRLOG(@"Error discovering services: %@", [error localizedDescription]);
+        //RDRLOG(@"Error discovering services: %@", [error localizedDescription]);
         return;
     }
     
-    //RDRLOG(@"Did discover services for peripheral: %@", peripheral.identifier.UUIDString);
+    ////RDRLOG(@"Did discover services for peripheral: %@", peripheral.identifier.UUIDString);
     // BlufiClient会处理后续操作，这里不需要特别实现
 }
 
 - (void)peripheral:(CBPeripheral *)peripheral didDiscoverCharacteristicsForService:(CBService *)service error:(NSError *)error {
     if (error) {
-        RDRLOG(@"Error discovering characteristics: %@", [error localizedDescription]);
+        //RDRLOG(@"Error discovering characteristics: %@", [error localizedDescription]);
         return;
     }
     
-    //RDRLOG(@"Did discover characteristics for service: %@", service.UUID.UUIDString);
+    ////RDRLOG(@"Did discover characteristics for service: %@", service.UUID.UUIDString);
     // BlufiClient会处理后续操作，这里不需要特别实现
 }
 
 - (void)peripheral:(CBPeripheral *)peripheral didUpdateValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
     if (error) {
-        RDRLOG(@"Error updating value for characteristic: %@", [error localizedDescription]);
+        //RDRLOG(@"Error updating value for characteristic: %@", [error localizedDescription]);
         return;
     }
     
@@ -1455,7 +1453,7 @@
 
 - (void)peripheral:(CBPeripheral *)peripheral didWriteValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error {
     if (error) {
-        RDRLOG(@"Error writing value for characteristic: %@", [error localizedDescription]);
+        //RDRLOG(@"Error writing value for characteristic: %@", [error localizedDescription]);
         return;
     }
     

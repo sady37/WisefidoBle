@@ -570,12 +570,14 @@
 				INFOPLIST_FILE = WisefidoBle/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = WisefidoBle;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This application need access to Bluetooth to scan and communicate with nearby devices.";
-				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This application need access to Bluetooth to communicate with peripherals.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "WisefidoBLE requires Bluetooth access to connect and configure your radar/sleep monitoring devices.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "WisefidoBLE requires Bluetooth access to connect and configure your radar/sleep monitoring devices.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "WisefidoBLE requires local network access for device discovery.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchStoryboardName = "";
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = "";
-				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "armv7 bluetooth-le";
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "bluetooth-le";
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -590,7 +592,7 @@
 					"$(PROJECT_DIR)/sdkEsp/Security/openssl/**",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.wisefido.WisefidoBLE;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wisefido.WisefidoBle;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -619,12 +621,14 @@
 				INFOPLIST_FILE = WisefidoBle/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = WisefidoBle;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "This application need access to Bluetooth to scan and communicate with nearby devices.";
-				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "This application need access to Bluetooth to communicate with peripherals.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "WisefidoBLE requires Bluetooth access to connect and configure your radar/sleep monitoring devices.";
+				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "WisefidoBLE requires Bluetooth access to connect and configure your radar/sleep monitoring devices.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "WisefidoBLE requires local network access for device discovery.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchStoryboardName = "";
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = "";
-				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "armv7 bluetooth-le";
+				INFOPLIST_KEY_UIRequiredDeviceCapabilities = "bluetooth-le";
+				INFOPLIST_KEY_UIRequiresFullScreen = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -639,7 +643,7 @@
 					"$(PROJECT_DIR)/sdkEsp/Security/openssl/**",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.wisefido.WisefidoBLE;
+				PRODUCT_BUNDLE_IDENTIFIER = com.wisefido.WisefidoBle;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
