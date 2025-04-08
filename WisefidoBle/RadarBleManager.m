@@ -226,10 +226,13 @@
     [self blufiClient];
 }
 
+
+
 /**
  * 准备使用设备 - 从缓存获取peripheral对象
  *  * @param device 设备信息
  */
+ 
 - (void)connectDevice:(DeviceInfo *)device {
     if (!device || !device.uuid) {
         //RDRLOG(@"Error: Invalid device information");
@@ -315,6 +318,7 @@
       _isQueryComplete = NO;
   }
 
+
 - (void)connectionTimedOut {
     //RDRLOG(@"Connection timed out for device");
     
@@ -336,6 +340,7 @@
 }
 
 //等待蓝牙服务和特征被发现后再进行安全协商：
+/*
 - (void)blufi:(BlufiClient *)client gattPrepared:(BlufiStatusCode)status service:(nullable CBService *)service writeChar:(nullable CBCharacteristic *)writeChar notifyChar:(nullable CBCharacteristic *)notifyChar {
     [_connectTimer invalidate];
     _connectTimer = nil;
@@ -372,6 +377,58 @@
         }
         
         // 清理资源
+        [self disconnect];
+    }
+}
+*/
+- (void)blufi:(BlufiClient *)client gattPrepared:(BlufiStatusCode)status service:(nullable CBService *)service writeChar:(nullable CBCharacteristic *)writeChar notifyChar:(nullable CBCharacteristic *)notifyChar {
+    [_connectTimer invalidate];
+    _connectTimer = nil;
+    
+    if (status == StatusSuccess && service && writeChar && notifyChar) {
+        RDRLOG(@"GATT prepared successfully, services and characteristics available - delaying security negotiation");
+        _isConnected = YES;
+        
+        // 关键改进：延长等待时间，确保BLE堆栈完全稳定
+        // 3秒是一个相对保守的延迟，但可确保高成功率
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            @try {
+                RDRLOG(@"Starting security negotiation...");
+                [self->_blufiClient negotiateSecurity];
+            } @catch (NSException *exception) {
+                RDRLOG(@"Security negotiation exception: %@", exception.reason);
+                
+                // 如果是特征为空的异常，可能需要重新初始化连接
+                if ([exception.reason containsString:@"characteristic != nil"]) {
+                    RDRLOG(@"Characteristic is null, need to re-establish connection");
+                    [self disconnect];
+                    
+                    // 延迟一段时间后重新连接
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        if (self->_currentDevice) {
+                            [self connectDevice:self->_currentDevice];
+                        }
+                    });
+                }
+            }
+        });
+    } else {
+        _isConnected = NO;
+        RDRLOG(@"GATT preparation failed: status=%d, service=%@, write characteristic=%@, notify characteristic=%@", 
+            status, 
+            service ? @"available" : @"unavailable", 
+            writeChar ? @"available" : @"unavailable", 
+            notifyChar ? @"available" : @"unavailable");
+        
+        // 如果正在查询，通知查询失败
+        if (_queryCallback && !_isQueryComplete) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                self->_queryCallback(self->_currentDevice, NO);
+                self->_queryCallback = nil;
+            });
+        }
+        
+        // 断开连接，清理资源
         [self disconnect];
     }
 }

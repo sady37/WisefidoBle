@@ -1101,9 +1101,7 @@
     
 }
 
-- (void)traitCollectionDidChange:(nullable UITraitCollection *)previousTraitCollection { 
-    
-}
+//- (void)traitCollectionDidChange:(nullable UITraitCollection *)previousTraitCollection { }
 
 - (void)preferredContentSizeDidChangeForChildContentContainer:(nonnull id<UIContentContainer>)container { 
     
