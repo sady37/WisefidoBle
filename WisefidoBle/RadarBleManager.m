@@ -20,6 +20,8 @@
 #import "ConfigModels.h"
 #import <os/log.h>
 
+
+
 // 日志宏定义
 #define RDRLOG(fmt, ...) NSLog((@"[RadarBleManager] " fmt), ##__VA_ARGS__)
 
@@ -40,12 +42,13 @@ typedef NS_ENUM(NSUInteger, RadarQueryCommand) {
 
 static NSTimeInterval const kRadarQueryCommandDelay = 0.4;
 static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
+static NSTimeInterval const kOperateStatusIdleInterval = 0.4;
 
 NSString * const RadarBlePreheatDidFinishNotification = @"RadarBlePreheatDidFinishNotification";
 NSString * const RadarBlePreheatResultKeySuccess = @"success";
 NSString * const RadarBlePreheatResultKeyUID = @"uid";
 
-@interface RadarBleManager() <CBCentralManagerDelegate, BlufiDelegate>
+@interface RadarBleManager() <CBCentralManagerDelegate, CBPeripheralDelegate, BlufiDelegate>
 
 // SDK managers
 @property (nonatomic, strong) BlufiClient *blufiClient;
@@ -115,6 +118,10 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
 @property (nonatomic, assign) BOOL shouldPerformPreheat;
 @property (nonatomic, assign) BOOL isPreheatingForConfiguration;
 @property (nonatomic, strong, nullable) NSTimer *preheatTimer;
+// 运行状态多帧缓存
+@property (nonatomic, assign) BOOL isCollectingOperateStatus;
+@property (nonatomic, strong) NSMutableString *respond10Buffer;
+@property (nonatomic, strong, nullable) NSTimer *respond10Timer;
 
 - (void)startQueryCommandPipeline;
 - (void)sendQueryCommandAtIndex:(NSUInteger)index;
@@ -131,6 +138,14 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
 - (void)preheatTimedOut;
 - (void)performConfigurationCommands;
 - (void)resetPreheatState;
+- (void)beginOperateStatusCollection;
+- (void)appendOperateStatusFragment:(NSString *)fragment removePrefix:(BOOL)removePrefix;
+- (void)finalizeOperateStatusCollection;
+- (void)restartOperateStatusTimer;
+- (void)invalidateOperateStatusTimer;
+- (void)operateStatusTimerFired;
+- (void)resetOperateStatusCollection;
+- (BOOL)isNumericString:(NSString *)string;
 
 @end
 
@@ -361,6 +376,7 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
           _wifiScanTimer = nil;
       }
 
+      [self resetOperateStatusCollection];
       [self resetPreheatState];
       _isEspScanOnly = NO;
 
@@ -1290,6 +1306,7 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
 
 - (void)sendOperationStatusQuery {
     RDRLOG(@"Sending operate status query command (10:)");
+    [self beginOperateStatusCollection];
     NSString *commandString = @"10:";
     NSData *operateCmd = [commandString dataUsingEncoding:NSASCIIStringEncoding];
     [_blufiClient postCustomData:operateCmd];
@@ -1463,6 +1480,7 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
     _isQueryComplete = YES;
     _isPerformingQueryPipeline = NO;
     _isEspScanOnly = NO;
+    [self resetOperateStatusCollection];
     
     DeviceInfo *resultDevice = _currentDevice;
     
@@ -1655,9 +1673,14 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
     }
     NSString *statusValue = nil;
     NSRange range = [responseStr rangeOfString:@":"];
-    if (range.location != NSNotFound && range.location + 1 < responseStr.length) {
-        statusValue = [[responseStr substringFromIndex:range.location + 1]
-                       stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (range.location != NSNotFound) {
+        NSUInteger valueIndex = range.location + 1;
+        if (valueIndex < responseStr.length) {
+            statusValue = [[responseStr substringFromIndex:valueIndex]
+                           stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        } else {
+            statusValue = @"";
+        }
     } else {
         statusValue = [responseStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     }
@@ -1717,20 +1740,35 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
     BOOL expectingOperateStatus = [self isCurrentQueryCommand:RadarQueryCommandOperateStatus];
     NSArray *parts = nil;
     NSInteger command = -1;
+    BOOL handledAsOperateStatusFragment = NO;
     
     if ([responseStr containsString:@":"]) {
         parts = [responseStr componentsSeparatedByString:@":"];
-        command = [[parts objectAtIndex:0] integerValue];
-    } else if (expectingOperateStatus) {
-        NSString *trimmed = [responseStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (trimmed.length > 0) {
-            [_statusMap setObject:trimmed forKey:@"radarRunStatus"];
-            RDRLOG(@"Received operate status response (raw): %@", trimmed);
+        NSString *token = parts.count > 0 ? parts[0] : @"";
+        BOOL tokenIsNumeric = [self isNumericString:token];
+        if (tokenIsNumeric) {
+            command = [token integerValue];
+            if (command == 10 && expectingOperateStatus) {
+                [self appendOperateStatusFragment:responseStr removePrefix:YES];
+                handledAsOperateStatusFragment = YES;
+            } else if (_isCollectingOperateStatus) {
+                [self finalizeOperateStatusCollection];
+            }
+        } else if (expectingOperateStatus) {
+            [self appendOperateStatusFragment:responseStr removePrefix:NO];
+            handledAsOperateStatusFragment = YES;
         }
-        [self advanceQueryPipeline];
+    } else if (expectingOperateStatus) {
+        [self appendOperateStatusFragment:responseStr removePrefix:NO];
+        handledAsOperateStatusFragment = YES;
+    }
+    
+    if (handledAsOperateStatusFragment) {
         return;
-    } else {
-        return;
+    }
+    
+    if (command == -1 && parts.count > 0) {
+        command = [[parts objectAtIndex:0] integerValue];
     }
 
     // 根据命令类型处理响应
@@ -2014,5 +2052,91 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
     }
     
     // 写入特征值完成，通常由BlufiClient内部处理
+}
+
+- (void)beginOperateStatusCollection {
+    _isCollectingOperateStatus = YES;
+    if (!_respond10Buffer) {
+        _respond10Buffer = [NSMutableString string];
+    } else {
+        [_respond10Buffer setString:@""];
+    }
+    [self invalidateOperateStatusTimer];
+}
+
+- (void)appendOperateStatusFragment:(NSString *)fragment removePrefix:(BOOL)removePrefix {
+    if (!_isCollectingOperateStatus) {
+        [self beginOperateStatusCollection];
+    }
+    if (!_respond10Buffer) {
+        _respond10Buffer = [NSMutableString string];
+    }
+    NSString *segment = fragment ?: @"";
+    if (removePrefix) {
+        NSRange colonRange = [segment rangeOfString:@":"];
+        if (colonRange.location != NSNotFound && colonRange.location + 1 < segment.length) {
+            segment = [segment substringFromIndex:colonRange.location + 1];
+        } else if (colonRange.location != NSNotFound) {
+            segment = @"";
+        }
+    }
+    segment = [segment stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (segment.length > 0) {
+        if (_respond10Buffer.length > 0) {
+            [_respond10Buffer appendString:@"\n"];
+        }
+        [_respond10Buffer appendString:segment];
+    }
+    [self restartOperateStatusTimer];
+}
+
+- (void)finalizeOperateStatusCollection {
+    if (!_isCollectingOperateStatus) {
+        return;
+    }
+    [self invalidateOperateStatusTimer];
+    _isCollectingOperateStatus = NO;
+    NSString *finalResult = _respond10Buffer.length > 0 ? [_respond10Buffer copy] : @"";
+    NSString *wrapped = [NSString stringWithFormat:@"10:%@", finalResult];
+    [_respond10Buffer setString:@""];
+    [self handleOperationStatusResponse:wrapped];
+}
+
+- (void)restartOperateStatusTimer {
+    [self invalidateOperateStatusTimer];
+    NSTimer *timer = [NSTimer timerWithTimeInterval:kOperateStatusIdleInterval
+                                             target:self
+                                           selector:@selector(operateStatusTimerFired)
+                                           userInfo:nil
+                                            repeats:NO];
+    [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+    _respond10Timer = timer;
+}
+
+- (void)invalidateOperateStatusTimer {
+    if (_respond10Timer) {
+        [_respond10Timer invalidate];
+        _respond10Timer = nil;
+    }
+}
+
+- (void)operateStatusTimerFired {
+    [self finalizeOperateStatusCollection];
+}
+
+- (void)resetOperateStatusCollection {
+    [self invalidateOperateStatusTimer];
+    _isCollectingOperateStatus = NO;
+    if (_respond10Buffer) {
+        [_respond10Buffer setString:@""];
+    }
+}
+
+- (BOOL)isNumericString:(NSString *)string {
+    if (string.length == 0) {
+        return NO;
+    }
+    NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+    return [string rangeOfCharacterFromSet:nonDigits].location == NSNotFound;
 }
 @end

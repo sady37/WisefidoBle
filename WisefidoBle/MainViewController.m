@@ -1085,18 +1085,23 @@
     if (device.wifiSignal == -255 && displayWifiSignal != -255) {
         device.wifiSignal = displayWifiSignal;
     }
-    [info appendFormat:@"wifiMode:%@   wifiRssi:%@\n",
-                       displayWifiMode.length > 0 ? displayWifiMode : @"Unknown",
-                       displayWifiSignal == -255 ? @"-255,not signal" : @(displayWifiSignal)];
+    NSString *wifiRssiDisplay = (displayWifiSignal == -255 ? @"-255,not signal" : [NSString stringWithFormat:@"%ld", (long)displayWifiSignal]);
+    [info appendFormat:@"wifiMode:%@\n",
+                       displayWifiMode.length > 0 ? displayWifiMode : @"Unknown"];
     if (displayWifiSsid.length > 0) {
-        [info appendFormat:@"wifiSsid:%@\n", displayWifiSsid];
+        [info appendFormat:@"wifiSsid:%@   wifiRssi:%@\n", displayWifiSsid, wifiRssiDisplay];
     } else {
-        [info appendString:@"wifiSsid:\n"];
+        [info appendFormat:@"wifiSsid:   wifiRssi:%@\n", wifiRssiDisplay];
     }
     
     // Radar run status
     if (device.radarRunStatus.length > 0) {
-        [info appendFormat:@"radarRunStatus:%@\n", device.radarRunStatus];
+        [info appendString:@"radarRunStatus:\n"];
+        [info appendString:device.radarRunStatus];
+        if (![device.radarRunStatus hasSuffix:@"\n"]) {
+            [info appendString:@"\n"];
+        }
+        [info appendString:@"\n"];
     }
     
     // Nearby Wi-Fi networks
