@@ -48,7 +48,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "1104"
             endingLineNumber = "1104"
-            landmarkName = "-traitCollectionDidChange:"
+            landmarkName = "-adjustLayoutForChildContainer:withSize:"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

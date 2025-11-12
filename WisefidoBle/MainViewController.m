@@ -7,12 +7,13 @@
 #import "SleepaceBleManager.h"
 #import "ConfigStorage.h"
 #import "ScanViewController.h"
+#import "RecentRecordsViewController.h"
 
 
 // 日志宏定义
 #define MAINLOG(fmt, ...) NSLog((@"[MainViewController] " fmt), ##__VA_ARGS__)
 
-@interface MainViewController ()
+@interface MainViewController () <UIPopoverPresentationControllerDelegate>
 
 // UI组件
 @property (nonatomic, strong) UIView *deviceInfoView;
@@ -578,80 +579,51 @@
 //#pragma mark - 设置按钮处理
 
 - (void)showServerHistoryMenu:(id)sender  {
-		    //MAINLOG(@"click  recentServer button!!!");
     NSArray<NSDictionary *> *recentServers = [self.configStorage getServerConfigs];
     if (recentServers.count == 0) {
         [self showMessage:@"No recent servers available"];
         return;
     }
-    
-    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"Recent Servers"
-                                                                             message:nil
-                                                                      preferredStyle:UIAlertControllerStyleActionSheet];
-    
-    for (NSDictionary *server in recentServers) {
-        NSString *serverAddress = server[@"serverAddress"];
-        NSString *serverPort = [server[@"serverPort"] stringValue];
-        NSString *serverTitle = [NSString stringWithFormat:@"%@:%@", serverAddress, serverPort];
-        
-        UIAlertAction *action = [UIAlertAction actionWithTitle:serverTitle
-                                                         style:UIAlertActionStyleDefault
-                                                       handler:^(UIAlertAction * _Nonnull action) {
-            self.serverAddressTextField.text = serverAddress;
-            self.serverPortTextField.text = serverPort;
-        }];
-        [alertController addAction:action];
-    }
-    
-    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
-                                                           style:UIAlertActionStyleCancel
-                                                         handler:nil];
-    [alertController addAction:cancelAction];
-    
-    if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        alertController.popoverPresentationController.sourceView = self.recentServerButton;
-        alertController.popoverPresentationController.sourceRect = self.recentServerButton.bounds;
-    }
-    
-    [self presentViewController:alertController animated:YES completion:nil];
+
+    __weak typeof(self) weakSelf = self;
+    RecentRecordsViewController *recordsVC = [[RecentRecordsViewController alloc] initWithType:RecentRecordTypeServer
+                                                                                        records:recentServers
+                                                                               selectionHandler:^(NSDictionary *selectedRecord) {
+        weakSelf.serverAddressTextField.text = selectedRecord[@"serverAddress"];
+        weakSelf.serverPortTextField.text = [selectedRecord[@"serverPort"] stringValue];
+    } deleteHandler:^BOOL(NSUInteger index) {
+        return [weakSelf.configStorage deleteServerConfigAtIndex:index];
+    }];
+
+    UIPopoverPresentationController *popover = recordsVC.popoverPresentationController;
+    popover.sourceView = self.recentServerButton;
+    popover.sourceRect = self.recentServerButton.bounds;
+    popover.delegate = self;
+    [self presentViewController:recordsVC animated:YES completion:nil];
 }
 
 - (void)showWifiHistoryMenu:(id)sender  {
     NSArray<NSDictionary<NSString *, NSString *> *> *recentWifis = [self.configStorage getWiFiConfigs];
     if (recentWifis.count == 0) {
-        [self showMessage:@"No recent WiFi networks available"];
+        [self showMessage:@"No recent Wi-Fi records"];
         return;
     }
-    
-    UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"Recent WiFi Networks"
-                                                                             message:nil
-                                                                      preferredStyle:UIAlertControllerStyleActionSheet];
-    
-    for (NSDictionary<NSString *, NSString *> *wifiConfig in recentWifis) {
-        NSString *wifiSsid = wifiConfig[@"ssid"];
-        NSString *wifiPassword = wifiConfig[@"password"];
-        
-        UIAlertAction *action = [UIAlertAction actionWithTitle:wifiSsid
-                                                         style:UIAlertActionStyleDefault
-                                                       handler:^(UIAlertAction * _Nonnull action) {
-            // 用户选择时，填充 SSID 和密码
-            self.wifiNameTextField.text = wifiSsid;
-            self.wifiPasswordTextField.text = wifiPassword;
-        }];
-        [alertController addAction:action];
-    }
-    
-    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
-                                                           style:UIAlertActionStyleCancel
-                                                         handler:nil];
-    [alertController addAction:cancelAction];
-    
-    if ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        alertController.popoverPresentationController.sourceView = self.recentWifiButton;
-        alertController.popoverPresentationController.sourceRect = self.recentWifiButton.bounds;
-    }
-    
-    [self presentViewController:alertController animated:YES completion:nil];
+
+    __weak typeof(self) weakSelf = self;
+    RecentRecordsViewController *recordsVC = [[RecentRecordsViewController alloc] initWithType:RecentRecordTypeWiFi
+                                                                                        records:recentWifis
+                                                                               selectionHandler:^(NSDictionary *selectedRecord) {
+        weakSelf.wifiNameTextField.text = selectedRecord[@"ssid"];
+        weakSelf.wifiPasswordTextField.text = selectedRecord[@"password"];
+    } deleteHandler:^BOOL(NSUInteger index) {
+        return [weakSelf.configStorage deleteWiFiConfigAtIndex:index];
+    }];
+
+    UIPopoverPresentationController *popover = recordsVC.popoverPresentationController;
+    popover.sourceView = self.recentWifiButton;
+    popover.sourceRect = self.recentWifiButton.bounds;
+    popover.delegate = self;
+    [self presentViewController:recordsVC animated:YES completion:nil];
 }
 
 #pragma mark - 配置验证
@@ -1154,6 +1126,14 @@
 
 - (void)dismissKeyboard {
     [self.view endEditing:YES];
+}
+
+- (UIModalPresentationStyle)adaptivePresentationStyleForPresentationController:(UIPresentationController *)controller {
+    return UIModalPresentationNone;
+}
+
+- (UIModalPresentationStyle)adaptivePresentationStyleForPresentationController:(UIPresentationController *)controller traitCollection:(UITraitCollection *)traitCollection {
+    return UIModalPresentationNone;
 }
 
 @end

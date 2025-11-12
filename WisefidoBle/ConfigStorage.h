@@ -7,10 +7,12 @@
 // 服务器配置管理
 - (void)saveServerConfig:(NSString *_Nullable)serverAddress port:(NSInteger)serverPort protocol:(nullable NSString *)serverProtocol;
 - (NSArray<NSDictionary *> *_Nullable)getServerConfigs;
+- (BOOL)deleteServerConfigAtIndex:(NSUInteger)index;
 
 // WiFi配置管理
 - (void)saveWiFiConfigWithSsid:(NSString *_Nullable)wifiSsid password:(NSString *_Nullable)wifiPassword;
 - (NSArray<NSDictionary<NSString *, NSString *> *> *_Nullable)getWiFiConfigs;
+- (BOOL)deleteWiFiConfigAtIndex:(NSUInteger)index;
 
 // 雷达设备名称管理
 - (void)saveRadarDeviceName:(NSString *_Nullable)name;

@@ -56,6 +56,16 @@ static const NSInteger kMaxConfigCount = 5;
     return [self loadArrayForKey:kServerConfigsKey] ?: @[];
 }
 
+- (BOOL)deleteServerConfigAtIndex:(NSUInteger)index {
+    NSMutableArray *configs = [self loadArrayForKey:kServerConfigsKey];
+    if (index < configs.count) {
+        [configs removeObjectAtIndex:index];
+        [self saveArray:configs forKey:kServerConfigsKey];
+        return YES;
+    }
+    return NO;
+}
+
 //wifi password  save to Keychain
 // 保存字符串到Keychain
 - (BOOL)saveSecureString:(NSString *)string forKey:(NSString *)key {
@@ -187,6 +197,22 @@ static const NSInteger kMaxConfigCount = 5;
     }
     
     return result;
+}
+
+- (BOOL)deleteWiFiConfigAtIndex:(NSUInteger)index {
+    NSMutableArray *wifiConfigs = [self loadArrayForKey:kWiFiConfigsKey];
+    if (index < wifiConfigs.count) {
+        NSDictionary *config = wifiConfigs[index];
+        if ([config[@"hasPassword"] boolValue]) {
+            NSString *ssid = config[@"ssid"];
+            NSString *keychainKey = [NSString stringWithFormat:@"wifi_password_%@", ssid];
+            [self deleteSecureItemForKey:keychainKey];
+        }
+        [wifiConfigs removeObjectAtIndex:index];
+        [self saveArray:wifiConfigs forKey:kWiFiConfigsKey];
+        return YES;
+    }
+    return NO;
 }
 
 
