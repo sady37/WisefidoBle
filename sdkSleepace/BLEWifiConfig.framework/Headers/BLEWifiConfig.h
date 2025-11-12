@@ -7,10 +7,10 @@
 //
 
 #import <UIKit/UIKit.h>
-#import "SLPBleWifiConfig.h"
-#import "SLPGetDeviceInfo.h"
-#import "SLPWiFiConnectStatus.h"
-#import "SLPGetWiFiInfo.h"
+#import <BLEWifiConfig/SLPBleWifiConfig.h>
+#import <BLEWifiConfig/SLPGetDeviceInfo.h>
+#import <BLEWifiConfig/SLPWiFiConnectStatus.h>
+#import <BLEWifiConfig/SLPGetWiFiInfo.h>
 
 #define kBLEWifiConfigVersion @"3.0.2"
 

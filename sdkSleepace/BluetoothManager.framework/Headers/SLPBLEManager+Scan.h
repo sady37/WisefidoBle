@@ -6,8 +6,8 @@
 //  Copyright © 2016 com.medica. All rights reserved.
 //
 
-#import "SLPBLEManager.h"
-#import "SLPBLEDef.h"
+#import <BluetoothManager/SLPBLEManager.h>
+#import <BluetoothManager/SLPBLEDef.h>
 
 //扫描蓝牙
 typedef NS_ENUM(int,SLPBleConnectStatus) {

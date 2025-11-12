@@ -8,7 +8,7 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import "SLPBLEDef.h"
+#import <BluetoothManager/SLPBLEDef.h>
 #import <SLPCommon/SLPCommon.h>
 
 

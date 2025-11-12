@@ -8,10 +8,10 @@
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
-#import "SLPAidInfo.h"
-#import "SLPClockDormancyBean.h"
-#import "SLPDataTransferDef.h"
-#import "SLPAlarmInfo.h"
+#import <SLPCommon/SLPAidInfo.h>
+#import <SLPCommon/SLPClockDormancyBean.h>
+#import <SLPCommon/SLPDataTransferDef.h>
+#import <SLPCommon/SLPAlarmInfo.h>
 NS_ASSUME_NONNULL_BEGIN
 
 #define SLPSharedHTTPManager [SLPHTTPManager sharedInstance]

@@ -7,7 +7,7 @@
 //
 
 #import <Foundation/Foundation.h>
-#import "SLPDataTransferDef.h"
+#import <SLPCommon/SLPDataTransferDef.h>
 
 //TCP或蓝牙的帧类型
 typedef NS_ENUM(NSInteger, SLPFramTypes) {

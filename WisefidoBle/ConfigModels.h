@@ -54,6 +54,8 @@ typedef NS_ENUM(NSInteger, FilterType) {
 
 // 其他状态信息
 @property (nonatomic, assign) NSTimeInterval lastUpdateTime; // 最后更新时间
+@property (nonatomic, strong, nullable) NSArray<NSDictionary *> *nearbyWiFiNetworks; // 周边WiFi扫描结果
+@property (nonatomic, copy, nullable) NSString *radarRunStatus; // 雷达运行状态
 
 // 初始化方法
 // 保留原有方法

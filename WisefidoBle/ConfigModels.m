@@ -43,6 +43,8 @@ NSString * const kDefaultServerProtocol = @"tcp";
         _serverPort = 0;
         _serverConnected = NO;
         _lastUpdateTime = 0;
+        _nearbyWiFiNetworks = @[];
+        _radarRunStatus = nil;
     }
     return self;
 }
@@ -78,6 +80,9 @@ NSString * const kDefaultServerProtocol = @"tcp";
         
         // 其他状态信息
         _lastUpdateTime = [coder decodeDoubleForKey:@"lastUpdateTime"];
+        NSArray *decodedNetworks = [coder decodeObjectForKey:@"nearbyWiFiNetworks"];
+        _nearbyWiFiNetworks = [decodedNetworks isKindOfClass:[NSArray class]] ? decodedNetworks : @[];
+        _radarRunStatus = [coder decodeObjectForKey:@"radarRunStatus"];
     }
     return self;
 }
@@ -109,6 +114,12 @@ NSString * const kDefaultServerProtocol = @"tcp";
     
     // 其他状态信息
     [coder encodeDouble:_lastUpdateTime forKey:@"lastUpdateTime"];
+    if (_nearbyWiFiNetworks) {
+        [coder encodeObject:_nearbyWiFiNetworks forKey:@"nearbyWiFiNetworks"];
+    }
+    if (_radarRunStatus) {
+        [coder encodeObject:_radarRunStatus forKey:@"radarRunStatus"];
+    }
 }
 
 @end
