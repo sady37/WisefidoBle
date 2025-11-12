@@ -124,7 +124,13 @@ typedef void(^RadarStatusCallback)(DeviceInfo * _Nonnull updatedDevice, BOOL suc
 - (void)queryDeviceStatus:(DeviceInfo *)device
               completion:(RadarStatusCallback)completion;
 
-
+/**
+ * 仅扫描附近 Wi-Fi（用于 ESP 设备）
+ * @param device 设备信息，必须包含有效的 uuid
+ * @param completion 回调返回包含附近 Wi-Fi 列表的设备信息
+ */
+- (void)scanNearbyWiFiForDevice:(DeviceInfo *)device
+                     completion:(RadarStatusCallback)completion;
 
 /**
  * 设置错误回调

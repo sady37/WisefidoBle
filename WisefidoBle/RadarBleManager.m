@@ -109,6 +109,7 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
 @property (nonatomic, strong, nullable) NSTimer *wifiScanTimer;
 @property (nonatomic, copy, nullable) void (^wifiScanCompletionBlock)(BOOL success);
 @property (nonatomic, strong, nullable) NSMutableArray<NSDictionary *> *wifiScanResultsBuffer;
+@property (nonatomic, assign) BOOL isEspScanOnly;
 
 // 预热控制
 @property (nonatomic, assign) BOOL shouldPerformPreheat;
@@ -361,6 +362,7 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
       }
 
       [self resetPreheatState];
+      _isEspScanOnly = NO;
 
       if (_isScanningNearbyWiFi) {
           [self completeNearbyWiFiScanWithResults:nil success:NO];
@@ -881,8 +883,14 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
         }
         [self performConfigurationCommands];
     } else if (_queryCallback) {
-        // 查询设备状态
-        [self startQueryCommandPipeline];
+        if (_isEspScanOnly) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self startNearbyWiFiScan];
+            });
+        } else {
+            // 查询设备状态
+            [self startQueryCommandPipeline];
+        }
     }
 }
 
@@ -1117,6 +1125,7 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
     // 保存状态回调和设备信息
     _queryCallback = completion;
     _currentDevice = device;  
+    _isEspScanOnly = NO;
     
     // 重置查询状态
     _isQueryComplete = NO;
@@ -1161,6 +1170,65 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
         //RDRLOG(@"Device not connected, connecting first...");
         [self connectDevice:device];
         // 注意：连接成功后的安全协商会在 gattPrepared 回调中处理
+    }
+}
+
+- (void)scanNearbyWiFiForDevice:(DeviceInfo *)device completion:(RadarStatusCallback)completion {
+    if (!device || !device.uuid) {
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(device, NO);
+            });
+        }
+        return;
+    }
+    
+    _queryCallback = completion;
+    _currentDevice = device;
+    _isEspScanOnly = YES;
+    _isQueryComplete = NO;
+    _hasWifiStatus = NO;
+    _hasUID = NO;
+    _hasMacAddress = NO;
+    _queryCommandSequence = nil;
+    _currentQueryCommandIndex = 0;
+    _isPerformingQueryPipeline = NO;
+    _isScanningNearbyWiFi = NO;
+    [_wifiScanTimer invalidate];
+    _wifiScanTimer = nil;
+    _wifiScanResultsBuffer = nil;
+    _statusMap = [NSMutableDictionary dictionary];
+    
+    [_queryTimer invalidate];
+    _queryTimer = [NSTimer scheduledTimerWithTimeInterval:DEFAULT_QUERY_TIMEOUT
+                                                  target:self
+                                                selector:@selector(queryTimedOut)
+                                                userInfo:nil
+                                                 repeats:NO];
+    
+    __weak typeof(self) weakSelf = self;
+    _wifiScanCompletionBlock = ^(BOOL success) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) { return; }
+        if (success) {
+            [strongSelf finishQuery:YES];
+        } else {
+            [strongSelf finishQuery:NO];
+        }
+    };
+    
+    BOOL isDeviceConnected = (_isConnected && _blufiClient &&
+                              [_currentDevice.uuid isEqualToString:device.uuid]);
+    
+    if (!isDeviceConnected) {
+        [self connectDevice:device];
+    } else {
+        @try {
+            [_blufiClient negotiateSecurity];
+        } @catch (NSException *exception) {
+            RDRLOG(@"negotiateSecurity exception (ESP scan path): %@", exception.reason);
+            [self finishQuery:NO];
+        }
     }
 }
 
@@ -1394,6 +1462,7 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
     
     _isQueryComplete = YES;
     _isPerformingQueryPipeline = NO;
+    _isEspScanOnly = NO;
     
     DeviceInfo *resultDevice = _currentDevice;
     

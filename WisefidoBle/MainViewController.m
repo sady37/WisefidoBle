@@ -62,6 +62,7 @@
 - (void)showServerHistoryMenu:(id)sender;
 - (void)showWifiHistoryMenu:(id)sender;
 - (void)handleRadarPreheatNotification:(NSNotification *)notification;
+- (void)queryEspStatus:(DeviceInfo *)device;
 
 // 其他原有的方法声明
 - (instancetype)initWithCentralManager:(CBCentralManager *)centralManager;
@@ -621,9 +622,11 @@
     // 根据设备类型进行不同的状态查询
     switch (self.selectedDevice.productorName) {
         case ProductorRadarQL:
-        case ProductorEspBle:
             // 查询Radar设备状态
             [self queryRadarStatus:self.selectedDevice];
+            break;
+        case ProductorEspBle:
+            [self queryEspStatus:self.selectedDevice];
             break;
             
         case ProductorSleepBoardHS:
@@ -986,6 +989,20 @@
         }
         
         // 更新设备信息
+        self.selectedDevice = updatedDevice;
+        [self updateStatusDisplay:updatedDevice];
+    }];
+}
+
+- (void)queryEspStatus:(DeviceInfo *)device {
+    [self showMessage:@"Querying ESP nearby Wi-Fi..."];
+    
+    [[RadarBleManager sharedManager] scanNearbyWiFiForDevice:device completion:^(DeviceInfo *updatedDevice, BOOL success) {
+        if (!success) {
+            [self showMessage:@"Failed to scan ESP nearby Wi-Fi"];
+            return;
+        }
+        
         self.selectedDevice = updatedDevice;
         [self updateStatusDisplay:updatedDevice];
     }];
