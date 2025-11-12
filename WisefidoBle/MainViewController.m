@@ -61,6 +61,7 @@
 //- (void)handleSearchButton:(id)sender;  //.h中已有
 - (void)showServerHistoryMenu:(id)sender;
 - (void)showWifiHistoryMenu:(id)sender;
+- (void)handleRadarPreheatNotification:(NSNotification *)notification;
 
 // 其他原有的方法声明
 - (instancetype)initWithCentralManager:(CBCentralManager *)centralManager;
@@ -103,11 +104,20 @@
     // 设置默认值
     self.serverAddressTextField.text = @"app.wisefido.com";
     self.serverPortTextField.text = @"tcp29010";
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleRadarPreheatNotification:)
+                                                 name:RadarBlePreheatDidFinishNotification
+                                               object:nil];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
     [self hidePasswordAndInvalidateTimer];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 
@@ -1167,6 +1177,45 @@
     
     // 显示消息
     [self showMessage:[NSString stringWithFormat:@"Device selected: %@", device.deviceName]];
+}
+
+- (void)handleRadarPreheatNotification:(NSNotification *)notification {
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self handleRadarPreheatNotification:notification];
+        });
+        return;
+    }
+    
+    if (!notification) {
+        return;
+    }
+    
+    id object = notification.object;
+    if (self.selectedDevice && object && object != self.selectedDevice) {
+        return;
+    }
+    
+    NSDictionary *userInfo = notification.userInfo;
+    BOOL success = [userInfo[RadarBlePreheatResultKeySuccess] boolValue];
+    NSString *uid = userInfo[RadarBlePreheatResultKeyUID];
+    
+    if (success && uid.length > 0 && self.selectedDevice) {
+        self.selectedDevice.uid = uid;
+    }
+    
+    NSString *message;
+    if (success) {
+        if (uid.length > 0) {
+            message = [NSString stringWithFormat:@"Preheat success, UID:%@", uid];
+        } else {
+            message = @"Preheat success, UID unavailable";
+        }
+    } else {
+        message = @"Preheat failed";
+    }
+    
+    [self showMessage:message];
 }
 
 #pragma mark - UITextFieldDelegate

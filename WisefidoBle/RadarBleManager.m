@@ -29,6 +29,7 @@
 #define DEFAULT_CONNECT_TIMEOUT 10.0
 #define DEFAULT_COMMAND_DELAY 1.0 // 延迟执行命令的时间
 #define DEFAULT_QUERY_TIMEOUT 20.0
+#define DEFAULT_PREHEAT_TIMEOUT 8.0
 
 typedef NS_ENUM(NSUInteger, RadarQueryCommand) {
     RadarQueryCommandUID = 0,
@@ -39,6 +40,10 @@ typedef NS_ENUM(NSUInteger, RadarQueryCommand) {
 
 static NSTimeInterval const kRadarQueryCommandDelay = 0.4;
 static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
+
+NSString * const RadarBlePreheatDidFinishNotification = @"RadarBlePreheatDidFinishNotification";
+NSString * const RadarBlePreheatResultKeySuccess = @"success";
+NSString * const RadarBlePreheatResultKeyUID = @"uid";
 
 @interface RadarBleManager() <CBCentralManagerDelegate, BlufiDelegate>
 
@@ -105,6 +110,11 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
 @property (nonatomic, copy, nullable) void (^wifiScanCompletionBlock)(BOOL success);
 @property (nonatomic, strong, nullable) NSMutableArray<NSDictionary *> *wifiScanResultsBuffer;
 
+// 预热控制
+@property (nonatomic, assign) BOOL shouldPerformPreheat;
+@property (nonatomic, assign) BOOL isPreheatingForConfiguration;
+@property (nonatomic, strong, nullable) NSTimer *preheatTimer;
+
 - (void)startQueryCommandPipeline;
 - (void)sendQueryCommandAtIndex:(NSUInteger)index;
 - (void)advanceQueryPipeline;
@@ -115,6 +125,11 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
 - (void)completeNearbyWiFiScanWithResults:(nullable NSArray<NSDictionary *> *)results success:(BOOL)success;
 - (void)sendOperationStatusQuery;
 - (void)handleOperationStatusResponse:(NSString *)responseStr;
+- (BOOL)startConfigurationPreheatIfNeeded;
+- (void)completeConfigurationPreheatWithSuccess:(BOOL)success uid:(nullable NSString *)uid;
+- (void)preheatTimedOut;
+- (void)performConfigurationCommands;
+- (void)resetPreheatState;
 
 @end
 
@@ -344,6 +359,8 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
           [_wifiScanTimer invalidate];
           _wifiScanTimer = nil;
       }
+
+      [self resetPreheatState];
 
       if (_isScanningNearbyWiFi) {
           [self completeNearbyWiFiScanWithResults:nil success:NO];
@@ -661,6 +678,92 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
     }
 }
 
+- (void)resetPreheatState {
+    _shouldPerformPreheat = NO;
+    _isPreheatingForConfiguration = NO;
+    if (_preheatTimer) {
+        [_preheatTimer invalidate];
+        _preheatTimer = nil;
+    }
+}
+
+- (BOOL)startConfigurationPreheatIfNeeded {
+    if (!_isConfiguring || !_shouldPerformPreheat) {
+        return NO;
+    }
+    if (_isPreheatingForConfiguration) {
+        return YES;
+    }
+    
+    _isPreheatingForConfiguration = YES;
+    _shouldPerformPreheat = NO;
+    
+    [_preheatTimer invalidate];
+    _preheatTimer = [NSTimer scheduledTimerWithTimeInterval:DEFAULT_PREHEAT_TIMEOUT
+                                                     target:self
+                                                   selector:@selector(preheatTimedOut)
+                                                   userInfo:nil
+                                                    repeats:NO];
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (self->_isPreheatingForConfiguration) {
+            RDRLOG(@"Starting configuration preheat (UID query)");
+            [self sendUIDQuery];
+        }
+    });
+    
+    return YES;
+}
+
+- (void)preheatTimedOut {
+    if (!_isPreheatingForConfiguration) {
+        return;
+    }
+    RDRLOG(@"Configuration preheat timed out");
+    [self completeConfigurationPreheatWithSuccess:NO uid:nil];
+}
+
+- (void)completeConfigurationPreheatWithSuccess:(BOOL)success uid:(nullable NSString *)uid {
+    if (!_isPreheatingForConfiguration) {
+        return;
+    }
+    
+    [_preheatTimer invalidate];
+    _preheatTimer = nil;
+    _isPreheatingForConfiguration = NO;
+    
+    NSMutableDictionary *userInfo = [@{ RadarBlePreheatResultKeySuccess : @(success) } mutableCopy];
+    if (uid.length > 0) {
+        userInfo[RadarBlePreheatResultKeyUID] = uid;
+    }
+    [[NSNotificationCenter defaultCenter] postNotificationName:RadarBlePreheatDidFinishNotification
+                                                        object:_currentDevice
+                                                      userInfo:userInfo];
+    
+    if (!success) {
+        RDRLOG(@"Preheat failed, aborting configuration");
+        [self configurationDidFailWithError:@"Failed to retrieve UID before configuration"];
+        return;
+    }
+    
+    RDRLOG(@"Preheat succeeded with UID: %@", uid ?: @"(nil)");
+    [self performConfigurationCommands];
+}
+
+- (void)performConfigurationCommands {
+    if (!_isConfiguring) {
+        return;
+    }
+    
+    if (_wifiSsid) {
+        [self sendWifiConfiguration];
+    } else if (_serverAddress) {
+        [self sendServerConfiguration];
+    } else {
+        [self configurationDidFailWithError:@"No valid configuration parameters"];
+    }
+}
+
 #pragma mark - 配置方法
 /**
  * 配置设备WiFi和服务器
@@ -701,6 +804,11 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
     _wifiSsid = wifiSsid;
     _wifiPassword = wifiPassword;
     
+    [self resetPreheatState];
+    if (device.productorName == ProductorRadarQL) {
+        _shouldPerformPreheat = YES;
+    }
+    
     // 设置配置超时
     [_configTimer invalidate];
     _configTimer = [NSTimer scheduledTimerWithTimeInterval:DEFAULT_CONFIG_TIMEOUT
@@ -720,25 +828,15 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
         //RDRLOG(@"Device not connected, connecting first...");
         
         [self connectDevice:device];
-        
-        // 使用延迟执行，确保连接有时间完成
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self->_blufiClient) {
-                // 进行安全协商
-                [self->_blufiClient negotiateSecurity];
-                
-                // 等待安全协商完成，在回调中继续执行配置
-                //RDRLOG(@"Waiting for security negotiation to complete...");
-            } else {
-                // 连接失败
-                //RDRLOG(@"Failed to connect to device");
-                [self configurationDidFailWithError:@"Failed to connect to device"];
-            }
-        });
     } else {
         // 设备已连接，直接进行安全协商
         //RDRLOG(@"Device already connected, proceeding with security negotiation...");
-        [_blufiClient negotiateSecurity];
+        @try {
+            [_blufiClient negotiateSecurity];
+        } @catch (NSException *exception) {
+            RDRLOG(@"negotiateSecurity exception (already connected path): %@", exception.reason);
+            [self configurationDidFailWithError:@"Failed to negotiate security for existing connection"];
+        }
     }
     
     // 注意：实际的配置操作将在didNegotiateSecurity回调中执行
@@ -778,16 +876,10 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
     
     // 根据配置参数选择适当的配置方法
     if (_isConfiguring) {
-        if (_wifiSsid) {
-            // 有WiFi配置，发送WiFi配置
-            [self sendWifiConfiguration];
-        } else if (_serverAddress) {
-            // 只有服务器配置，发送服务器配置
-            [self sendServerConfiguration];
-        } else {
-            // 没有有效的配置参数
-            [self configurationDidFailWithError:@"No valid configuration parameters"];
+        if ([self startConfigurationPreheatIfNeeded]) {
+            return;
         }
+        [self performConfigurationCommands];
     } else if (_queryCallback) {
         // 查询设备状态
         [self startQueryCommandPipeline];
@@ -861,7 +953,7 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                             // 配置完成，返回成功结果
                             [result setObject:@(YES) forKey:@"success"];
-                            [result setObject:@"Server configuration completed" forKey:@"message"];
+                            [result setObject:@"Server configuration completed\nwait 10 seconds for restart" forKey:@"message"];
                             
                             if (self->_configCallback) {
                                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -871,6 +963,7 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
                             
                             // 清理状态
                             self->_isConfiguring = NO;
+                            [self resetPreheatState];
                             [self->_configTimer invalidate];
                             self->_configTimer = nil;
                         });
@@ -941,6 +1034,7 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
             
             // 清理状态
             _isConfiguring = NO;
+            [self resetPreheatState];
             [_configTimer invalidate];
             _configTimer = nil;
         }
@@ -958,6 +1052,7 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
         
         // 清理状态
         _isConfiguring = NO;
+        [self resetPreheatState];
         [_configTimer invalidate];
         _configTimer = nil;
     }
@@ -968,6 +1063,8 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
  */
 - (void)configurationDidFailWithError:(NSString *)error {
     //RDRLOG(@"Configuration failed: %@", error);
+    
+    [self resetPreheatState];
     
     // 取消超时计时器
     [_configTimer invalidate];
@@ -1369,20 +1466,48 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
  * 处理UID响应
  */
 - (void)handleUIDResponse:(NSString *)responseStr {
-    if (![self isCurrentQueryCommand:RadarQueryCommandUID]) {
+    BOOL isQueryCommand = [self isCurrentQueryCommand:RadarQueryCommandUID];
+    BOOL isPreheatResponse = _isPreheatingForConfiguration;
+    
+    if (!isQueryCommand && !isPreheatResponse) {
         return;
     }
     NSArray *parts = [responseStr componentsSeparatedByString:@":"];
+    NSString *uid = nil;
     if (parts.count >= 2) {
-        NSString *uid = [parts objectAtIndex:1];
-        uid = [uid stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (uid.length > 0) {
+        uid = [parts objectAtIndex:1];
+    } else if (parts.count == 1 && !isQueryCommand) {
+        uid = parts.firstObject;
+    }
+    
+    if ((!uid || uid.length == 0) && responseStr.length > 0) {
+        NSRange range = [responseStr rangeOfString:@":"];
+        if (range.location != NSNotFound && range.location + 1 < responseStr.length) {
+            uid = [responseStr substringFromIndex:range.location + 1];
+        } else {
+            uid = responseStr;
+        }
+    }
+    
+    uid = [uid stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (uid.length > 0) {
+        if (isQueryCommand) {
             [_statusMap setObject:uid forKey:@"uid"];
             _hasUID = YES;
             RDRLOG(@"Received UID response: %@", uid);
         }
+        if (isPreheatResponse) {
+            _currentDevice.uid = uid;
+            [self completeConfigurationPreheatWithSuccess:YES uid:uid];
+        }
+    } else if (isPreheatResponse) {
+        RDRLOG(@"Preheat UID response invalid: %@", responseStr);
+        [self completeConfigurationPreheatWithSuccess:NO uid:nil];
     }
-    [self advanceQueryPipeline];
+    
+    if (isQueryCommand) {
+        [self advanceQueryPipeline];
+    }
 }
 
 /**
@@ -1543,7 +1668,7 @@ static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
     switch (command) {
         case 12: // UID 查询响应
             // 查询和配置都可能使用这个命令
-            if (_queryCallback && !_isQueryComplete) {
+            if ((_queryCallback && !_isQueryComplete) || _isPreheatingForConfiguration) {
                 [self handleUIDResponse:responseStr];
             }
             break;

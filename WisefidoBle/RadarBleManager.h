@@ -28,6 +28,11 @@ typedef NS_ENUM(NSInteger, RadarBleErrorType) {
     RadarBleErrorUnknown                 // 未知错误
 };
 
+// 预热通知
+extern NSString * const RadarBlePreheatDidFinishNotification;
+extern NSString * const RadarBlePreheatResultKeySuccess;
+extern NSString * const RadarBlePreheatResultKeyUID;
+
 /**
  * Radar设备扫描结果回调
  * @param deviceInfo 发现的设备信息

@@ -23,24 +23,8 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "F1366615-9F24-4405-A9CE-1485DC7EB6FF"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "WisefidoBle/ScanViewController.m"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "171"
-            endingLineNumber = "171"
-            landmarkName = "-init"
-            landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
             uuid = "583D0605-A37A-4CB6-BA1A-8D3F3DED096C"
-            shouldBeEnabled = "Yes"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
             filePath = "WisefidoBle/MainViewController.m"
@@ -48,7 +32,7 @@
             endingColumnNumber = "9223372036854775807"
             startingLineNumber = "1104"
             endingLineNumber = "1104"
-            landmarkName = "-adjustLayoutForChildContainer:withSize:"
+            landmarkName = "-showMessage:"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>
