@@ -8,6 +8,7 @@
 #import "ConfigStorage.h"
 #import "ScanViewController.h"
 #import "RecentRecordsViewController.h"
+#import <os/log.h>
 
 
 // 日志宏定义
@@ -29,7 +30,7 @@
 @property (nonatomic, strong) UILabel *deviceTitleLabel; // Device 标题
 @property (nonatomic, strong) UIStackView *headerStackView; // 水平容器
 @property (nonatomic, strong) UIButton *pairButton;
-@property (nonatomic, strong) UIButton *statusButton;
+@property (nonatomic, strong) UIButton *queryButton;
 @property (nonatomic, strong) UIButton *searchButton;
 
 
@@ -44,6 +45,10 @@
 @property (nonatomic, strong) UIView *historyContainer;
 @property (nonatomic, strong) UIView *buttonContainer;
 
+@property (nonatomic, strong) UIButton *passwordRevealButton;
+@property (nonatomic, strong, nullable) NSTimer *passwordRevealTimer;
+@property (nonatomic, assign) BOOL passwordTemporarilyVisible;
+
 // 属性
 @property (nonatomic, strong) DeviceInfo *selectedDevice;
 @property (nonatomic, strong) ConfigStorage *configStorage;
@@ -52,7 +57,7 @@
 
 // 方法声明
 - (void)handlePairButton:(id)sender;
-- (void)handleStatusButton:(id)sender;
+- (void)handleQueryButton:(id)sender;
 //- (void)handleSearchButton:(id)sender;  //.h中已有
 - (void)showServerHistoryMenu:(id)sender;
 - (void)showWifiHistoryMenu:(id)sender;
@@ -97,9 +102,12 @@
     
     // 设置默认值
     self.serverAddressTextField.text = @"app.wisefido.com";
-    self.serverPortTextField.text = @"1060";
-  
+    self.serverPortTextField.text = @"tcp29010";
+}
 
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self hidePasswordAndInvalidateTimer];
 }
 
 
@@ -137,13 +145,13 @@
     [_pairButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
     [_headerStackView addArrangedSubview:_pairButton];
 
-    // Status 按钮
-    _statusButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_statusButton setTitle:@"Status" forState:UIControlStateNormal];
-    _statusButton.layer.cornerRadius = 20.0;
-    _statusButton.backgroundColor = [UIColor systemGreenColor];
-    [_statusButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
-    [_headerStackView addArrangedSubview:_statusButton];
+    // Query 按钮
+    _queryButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_queryButton setTitle:@"Query" forState:UIControlStateNormal];
+    _queryButton.layer.cornerRadius = 20.0;
+    _queryButton.backgroundColor = [UIColor systemGreenColor];
+    [_queryButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
+    [_headerStackView addArrangedSubview:_queryButton];
 
     // 自适应填充空格的 UIView
     UIView *spacerView = [[UIView alloc] init];
@@ -248,6 +256,21 @@
     _wifiPasswordTextField.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_wifiPasswordTextField];
 
+    _passwordRevealButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _passwordRevealButton.frame = CGRectMake(0, 0, 36, 36);
+    if (@available(iOS 13.0, *)) {
+        UIImage *eyeImage = [UIImage systemImageNamed:@"eye"];
+        [_passwordRevealButton setImage:eyeImage forState:UIControlStateNormal];
+        _passwordRevealButton.tintColor = [UIColor secondaryLabelColor];
+    } else {
+        [_passwordRevealButton setTitle:@"Show" forState:UIControlStateNormal];
+        [_passwordRevealButton setTitleColor:[UIColor darkTextColor] forState:UIControlStateNormal];
+    }
+    [_passwordRevealButton addTarget:self action:@selector(handlePasswordRevealTap:) forControlEvents:UIControlEventTouchUpInside];
+    _wifiPasswordTextField.rightView = _passwordRevealButton;
+    _wifiPasswordTextField.rightViewMode = UITextFieldViewModeAlways;
+    [self updatePasswordRevealButtonAppearance:NO];
+
         // ------------ 历史记录区域 ------------
     _historyContainer = [[UIView alloc] init];
     _historyContainer.translatesAutoresizingMaskIntoConstraints = NO;
@@ -300,8 +323,8 @@
     [NSLayoutConstraint activateConstraints:@[
         [_pairButton.widthAnchor constraintEqualToConstant:65],
         [_pairButton.heightAnchor constraintEqualToConstant:40],
-        [_statusButton.widthAnchor constraintEqualToConstant:65],
-        [_statusButton.heightAnchor constraintEqualToConstant:40],
+        [_queryButton.widthAnchor constraintEqualToConstant:65],
+        [_queryButton.heightAnchor constraintEqualToConstant:40],
         [_searchButton.widthAnchor constraintEqualToConstant:44],
         [_searchButton.heightAnchor constraintEqualToConstant:44]
     ]];
@@ -430,10 +453,86 @@
 
 - (void)setupActions {
     [self.pairButton addTarget:self action:@selector(handlePairButton:) forControlEvents:UIControlEventTouchUpInside];
-    [self.statusButton addTarget:self action:@selector(handleStatusButton:) forControlEvents:UIControlEventTouchUpInside];
+    [self.queryButton addTarget:self action:@selector(handleQueryButton:) forControlEvents:UIControlEventTouchUpInside];
     [self.searchButton addTarget:self action:@selector(handleSearchButton:) forControlEvents:UIControlEventTouchUpInside];
     [self.recentServerButton addTarget:self action:@selector(showServerHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
     [self.recentWifiButton addTarget:self action:@selector(showWifiHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
+}
+
+#pragma mark - 密码显示控制
+
+- (void)handlePasswordRevealTap:(id)sender {
+    if (self.passwordTemporarilyVisible) {
+        [self hidePasswordAndInvalidateTimer];
+    } else {
+        [self revealPasswordTemporarily];
+    }
+}
+
+- (void)revealPasswordTemporarily {
+    self.passwordTemporarilyVisible = YES;
+    [self updatePasswordSecureEntry:NO];
+    [self invalidatePasswordRevealTimer];
+    NSTimer *timer = [NSTimer timerWithTimeInterval:3.0
+                                             target:self
+                                           selector:@selector(passwordRevealTimerFired:)
+                                           userInfo:nil
+                                            repeats:NO];
+    self.passwordRevealTimer = timer;
+    [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
+}
+
+- (void)hidePasswordAndInvalidateTimer {
+    self.passwordTemporarilyVisible = NO;
+    [self invalidatePasswordRevealTimer];
+    [self updatePasswordSecureEntry:YES];
+}
+
+- (void)passwordRevealTimerFired:(NSTimer *)timer {
+    [self hidePasswordAndInvalidateTimer];
+}
+
+- (void)invalidatePasswordRevealTimer {
+    if (self.passwordRevealTimer) {
+        [self.passwordRevealTimer invalidate];
+        self.passwordRevealTimer = nil;
+    }
+}
+
+- (void)updatePasswordSecureEntry:(BOOL)secure {
+    if (self.wifiPasswordTextField.secureTextEntry == secure) {
+        [self updatePasswordRevealButtonAppearance:!secure];
+        return;
+    }
+
+    BOOL wasFirstResponder = self.wifiPasswordTextField.isFirstResponder;
+    NSString *currentText = self.wifiPasswordTextField.text ?: @"";
+    self.wifiPasswordTextField.secureTextEntry = secure;
+    self.wifiPasswordTextField.text = @"";
+    self.wifiPasswordTextField.text = currentText;
+    if (wasFirstResponder) {
+        [self.wifiPasswordTextField becomeFirstResponder];
+        UITextPosition *endPosition = self.wifiPasswordTextField.endOfDocument;
+        if (endPosition) {
+            UITextRange *range = [self.wifiPasswordTextField textRangeFromPosition:endPosition toPosition:endPosition];
+            [self.wifiPasswordTextField setSelectedTextRange:range];
+        }
+    }
+    [self updatePasswordRevealButtonAppearance:!secure];
+}
+
+- (void)updatePasswordRevealButtonAppearance:(BOOL)isRevealed {
+    if (@available(iOS 13.0, *)) {
+        NSString *symbolName = isRevealed ? @"eye.slash" : @"eye";
+        UIImage *image = [UIImage systemImageNamed:symbolName];
+        [self.passwordRevealButton setImage:image forState:UIControlStateNormal];
+        self.passwordRevealButton.tintColor = isRevealed ? [UIColor systemBlueColor] : [UIColor secondaryLabelColor];
+    } else {
+        NSString *title = isRevealed ? @"Hide" : @"Show";
+        [self.passwordRevealButton setTitle:title forState:UIControlStateNormal];
+        UIColor *color = isRevealed ? [UIColor blueColor] : [UIColor darkTextColor];
+        [self.passwordRevealButton setTitleColor:color forState:UIControlStateNormal];
+    }
 }
 
 #pragma mark - 数据加载
@@ -467,9 +566,15 @@
     }
  
     // 获取配置参数
-    NSString *serverAddress = self.serverAddressTextField.text;
-    NSInteger serverPort = [self.serverPortTextField.text integerValue];
-    NSString *serverProtocol = @"tcp"; // 默认协议
+    NSString *serverAddress = self.serverAddressTextField.text ?: @"";
+    NSString *portInput = self.serverPortTextField.text ?: @"";
+    NSArray *protocolAndPort = [self parseProtocolAndPort:portInput];
+    if (!serverAddress.length || protocolAndPort.count != 2) {
+        [self showMessage:@"Invalid server address or port"];
+        return;
+    }
+    NSString *serverProtocol = protocolAndPort[0];
+    NSInteger serverPort = [protocolAndPort[1] integerValue];
     NSString *wifiSsid = self.wifiNameTextField.text;
     NSString *wifiPassword = self.wifiPasswordTextField.text;
     
@@ -483,9 +588,7 @@
     if (wifiSsid.length) {
         [self.configStorage saveWiFiConfigWithSsid:wifiSsid password:wifiPassword];
     }
-    if (serverAddress.length && serverPort > 0) {
-        [self.configStorage saveServerConfig:serverAddress port:serverPort protocol:serverProtocol];
-    }
+    [self.configStorage saveServerConfig:serverAddress port:serverPort protocol:serverProtocol];
     
     // 执行设备配置
     [self configureDevice:self.selectedDevice
@@ -497,8 +600,8 @@
                completion:nil]; // 这里不需要额外的回调，因为方法内部已经处理了UI更新
 }
 
-- (void)handleStatusButton:(id)sender  {
-	    MAINLOG(@"Status button tapped!!");
+- (void)handleQueryButton:(id)sender  {
+    MAINLOG(@"Query button tapped!!");
     // 检查设备选择
     if (!self.selectedDevice) {
         [self showMessage:@"Please select a device first"];
@@ -590,7 +693,14 @@
                                                                                         records:recentServers
                                                                                selectionHandler:^(NSDictionary *selectedRecord) {
         weakSelf.serverAddressTextField.text = selectedRecord[@"serverAddress"];
-        weakSelf.serverPortTextField.text = [selectedRecord[@"serverPort"] stringValue];
+        NSNumber *portNumber = selectedRecord[@"serverPort"];
+        NSString *protocol = selectedRecord[@"serverProtocol"] ?: @"tcp";
+        NSString *portString = portNumber ? [portNumber stringValue] : @"";
+        if (portString.length > 0) {
+            weakSelf.serverPortTextField.text = [NSString stringWithFormat:@"%@%@", protocol, portString];
+        } else {
+            weakSelf.serverPortTextField.text = protocol;
+        }
     } deleteHandler:^BOOL(NSUInteger index) {
         return [weakSelf.configStorage deleteServerConfigAtIndex:index];
     }];
@@ -950,7 +1060,7 @@
 
     // Update the status output text view
     self.statusOutputTextView.text = info;
-    [self showMessage:@"Status updated"];
+    [self showMessage:@"Query updated"];
 }
 
 #pragma mark - 辅助方法
@@ -991,8 +1101,17 @@
     NSRange bottom = NSMakeRange(newText.length, 0);
     [self.statusOutputTextView scrollRangeToVisible:bottom];
     
-    // 输出日志
-    MAINLOG(@"%@", message);
+    // 输出日志（使用 os_log 避免阻塞主线程）
+    if (@available(iOS 10.0, *)) {
+        static os_log_t mainViewLog;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            mainViewLog = os_log_create("com.wisefido.ble", "MainViewController");
+        });
+        os_log_with_type(mainViewLog, OS_LOG_TYPE_INFO, "%{public}@", message);
+    } else {
+        NSLog(@"%@", message);
+    }
 }
 
 #pragma mark - ScanViewControllerDelegate

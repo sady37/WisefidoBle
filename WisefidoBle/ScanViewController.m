@@ -944,49 +944,9 @@
     // 获取选中的设备
     DeviceInfo *device = _deviceList[indexPath.row];
     
-    // 停止所有扫描并等待完成
+    // 停止所有扫描（非阻塞，依赖 stopScan 内部处理）
     if (_isScanning || _isRssiScanning) {
-        // 创建一个信号量来等待扫描停止
-        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-        
-        // 在主线程上停止扫描
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self stopScan];
-            
-            // 确保完全停止，增加额外的停止检查
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                // 再次确保扫描完全停止
-                @try {
-                    if (self->_cbManager) {
-                        [self->_cbManager stopScan];
-                    }
-                    
-                    // 确保特定管理器的扫描也已停止
-                    switch (device.productorName) {
-                        case ProductorSleepBoardHS:
-                            [[SleepaceBleManager getInstance:self] stopScan];
-                            break;
-                        
-                        case ProductorRadarQL:
-                        case ProductorEspBle:
-                            [[RadarBleManager sharedManager] stopScan];
-                            break;
-                            
-                        default:
-                            break;
-                    }
-                } @catch (NSException *exception) {
-                    NSLog(@"停止扫描时异常: %@", exception);
-                }
-                
-                // 扫描已经完全停止，发出信号
-                dispatch_semaphore_signal(semaphore);
-            });
-        });
-        
-        // 等待扫描完全停止（最多等待0.5秒）
-        dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC));
-        dispatch_semaphore_wait(semaphore, timeout);
+        [self stopScan];
     }
     
     // 处理Sleepace设备
@@ -994,15 +954,15 @@
         [[SleepaceBleManager getInstance:self] setCurrentDevice:device];
     }
     
-    // 通知代理
-    if (self.delegate && [self.delegate respondsToSelector:@selector(scanViewController:didSelectDevice:)]) {
-        NSLog(@"iforming delegate about selected device");
-        [self.delegate scanViewController:self didSelectDevice:device];
-    }
-    
-    // 关闭视图
-    NSLog(@"All operations completed, dismissing view controller");
-    [self dismissViewControllerAnimated:YES completion:nil];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.delegate && [self.delegate respondsToSelector:@selector(scanViewController:didSelectDevice:)]) {
+            NSLog(@"iforming delegate about selected device");
+            [self.delegate scanViewController:self didSelectDevice:device];
+        }
+        
+        NSLog(@"All operations completed, dismissing view controller");
+        [self dismissViewControllerAnimated:YES completion:nil];
+    });
 }
 
 
