@@ -1,5 +1,6 @@
 WisefidoBle
 20250402   v1.0  完成sleepBoard scan/config,Esp scan/config/query
+20251112   v1.1  重建Radar查询/配置：添加预热流程、查询管线和ESP独立Wi-Fi扫描；完善主界面状态显示与历史记录体验。
                  
 
 
