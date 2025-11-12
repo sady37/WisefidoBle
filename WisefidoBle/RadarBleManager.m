@@ -18,6 +18,7 @@
 #import "RadarBleManager.h"
 #import <CoreBluetooth/CoreBluetooth.h>
 #import "ConfigModels.h"
+#import <os/log.h>
 
 // 日志宏定义
 #define RDRLOG(fmt, ...) NSLog((@"[RadarBleManager] " fmt), ##__VA_ARGS__)
@@ -28,6 +29,16 @@
 #define DEFAULT_CONNECT_TIMEOUT 10.0
 #define DEFAULT_COMMAND_DELAY 1.0 // 延迟执行命令的时间
 #define DEFAULT_QUERY_TIMEOUT 20.0
+
+typedef NS_ENUM(NSUInteger, RadarQueryCommand) {
+    RadarQueryCommandUID = 0,
+    RadarQueryCommandMAC,
+    RadarQueryCommandWifiStatus,
+    RadarQueryCommandOperateStatus
+};
+
+static NSTimeInterval const kRadarQueryCommandDelay = 0.4;
+static NSTimeInterval const kRadarWifiScanTimeout = 8.0;
 
 @interface RadarBleManager() <CBCentralManagerDelegate, BlufiDelegate>
 
@@ -66,6 +77,9 @@
 @property (nonatomic, assign) BOOL hasWifiStatus;
 @property (nonatomic, assign) BOOL hasUID;
 @property (nonatomic, assign) BOOL hasMacAddress; 
+@property (nonatomic, strong, nullable) NSArray<NSNumber *> *queryCommandSequence;
+@property (nonatomic, assign) NSUInteger currentQueryCommandIndex;
+@property (nonatomic, assign) BOOL isPerformingQueryPipeline;
 
 // 与服务器配置相关的属性
 @property (nonatomic, copy) NSString *serverAddress;
@@ -84,6 +98,23 @@
 // 错误处理
 @property (nonatomic, assign) NSInteger errorCount;
 @property (nonatomic, copy) void(^errorCallback)(RadarBleErrorType errorType, NSString *errorMessage);
+
+// Wi-Fi 扫描
+@property (nonatomic, assign) BOOL isScanningNearbyWiFi;
+@property (nonatomic, strong, nullable) NSTimer *wifiScanTimer;
+@property (nonatomic, copy, nullable) void (^wifiScanCompletionBlock)(BOOL success);
+@property (nonatomic, strong, nullable) NSMutableArray<NSDictionary *> *wifiScanResultsBuffer;
+
+- (void)startQueryCommandPipeline;
+- (void)sendQueryCommandAtIndex:(NSUInteger)index;
+- (void)advanceQueryPipeline;
+- (BOOL)isCurrentQueryCommand:(RadarQueryCommand)command;
+- (void)queryPipelineDidComplete;
+- (void)startNearbyWiFiScan;
+- (void)wifiScanTimedOut;
+- (void)completeNearbyWiFiScanWithResults:(nullable NSArray<NSDictionary *> *)results success:(BOOL)success;
+- (void)sendOperationStatusQuery;
+- (void)handleOperationStatusResponse:(NSString *)responseStr;
 
 @end
 
@@ -276,6 +307,8 @@
   - (void)disconnect {
       //RDRLOG(@"Disconnecting device");
 
+      BOOL hasPendingQuery = (_queryCallback != nil);
+
       // 清理 BlufiClient
       if (_blufiClient) {
           @try {
@@ -285,11 +318,6 @@
           }
           _blufiClient = nil;
       }
-
-      // 清理资源
-      _currentDevice = nil;
-      _currentPeripheral = nil;
-      _currentDeviceUUID = nil;
 
       // 取消所有定时器
       if (_scanTimer) {
@@ -312,10 +340,32 @@
           _queryTimer = nil;
       }
 
+      if (_wifiScanTimer) {
+          [_wifiScanTimer invalidate];
+          _wifiScanTimer = nil;
+      }
+
+      if (_isScanningNearbyWiFi) {
+          [self completeNearbyWiFiScanWithResults:nil success:NO];
+      }
+
+      if (!hasPendingQuery && !_isConfiguring) {
+          _currentDevice = nil;
+          _currentPeripheral = nil;
+          _currentDeviceUUID = nil;
+      }
+
       // 重置状态
       _isConnected = NO;
-      _isConfiguring = NO;
-      _isQueryComplete = NO;
+      if (!_isConfiguring) {
+          _isConfiguring = NO;
+      }
+      if (!hasPendingQuery) {
+          _isQueryComplete = NO;
+          _isPerformingQueryPipeline = NO;
+          _wifiScanResultsBuffer = nil;
+          _wifiScanCompletionBlock = nil;
+      }
   }
 
 
@@ -740,7 +790,7 @@
         }
     } else if (_queryCallback) {
         // 查询设备状态
-        [self sendUIDQuery];
+        [self startQueryCommandPipeline];
     }
 }
 
@@ -978,6 +1028,13 @@
     _hasMacAddress = NO;
     // 初始化状态字典
     _statusMap = [NSMutableDictionary dictionary];
+    _queryCommandSequence = nil;
+    _currentQueryCommandIndex = 0;
+    _isPerformingQueryPipeline = NO;
+    _isScanningNearbyWiFi = NO;
+    [_wifiScanTimer invalidate];
+    _wifiScanTimer = nil;
+    _wifiScanCompletionBlock = nil;
     
     // 设置查询超时
     [_queryTimer invalidate];
@@ -1042,6 +1099,7 @@
  */
 - (void)sendUIDQuery {
     //RDRLOG(@"Sending UID query command");
+    RDRLOG(@"Sending UID query command (12:)");
     NSData *uidCmd = [@"12:" dataUsingEncoding:NSUTF8StringEncoding];
     [_blufiClient postCustomData:uidCmd];
 }
@@ -1051,6 +1109,7 @@
  */
 - (void)sendMACQuery {
     //RDRLOG(@"Sending MAC address query command");
+    RDRLOG(@"Sending MAC query command (65:)");
     NSData *macCmd = [@"65:" dataUsingEncoding:NSUTF8StringEncoding];
     [_blufiClient postCustomData:macCmd];
 }
@@ -1059,15 +1118,175 @@
  * 发送 WiFi 状态查询命令 - 使用 ESP SDK 标准方法
  */
 - (void)sendWiFiStatusQuery {
-    //RDRLOG(@"Requesting device WiFi status using standard BluFi method");
-    [_blufiClient requestDeviceStatus];
-    // 结果将在 didReceiveDeviceStatusResponse 回调中处理
-    
-    //radar self command
-    //    NSData *wifiCmd = [@"62:" dataUsingEncoding:NSUTF8StringEncoding];
-    //[_blufiClient postCustomData:wifiCmd];
+    RDRLOG(@"Sending WiFi status query command (62:)");
+    NSData *wifiCmd = [@"62:" dataUsingEncoding:NSUTF8StringEncoding];
+    [_blufiClient postCustomData:wifiCmd];
 }
 
+- (void)sendOperationStatusQuery {
+    RDRLOG(@"Sending operate status query command (10:)");
+    NSString *commandString = @"10:";
+    NSData *operateCmd = [commandString dataUsingEncoding:NSASCIIStringEncoding];
+    [_blufiClient postCustomData:operateCmd];
+}
+
+- (void)startQueryCommandPipeline {
+    if (!_queryCallback) {
+        return;
+    }
+    _queryCommandSequence = @[
+        @(RadarQueryCommandMAC),
+        @(RadarQueryCommandUID),
+        @(RadarQueryCommandWifiStatus),
+        @(RadarQueryCommandOperateStatus)
+    ];
+    _currentQueryCommandIndex = 0;
+    _isPerformingQueryPipeline = YES;
+    RDRLOG(@"Starting query pipeline: MAC -> UID -> WiFiStatus -> OperateStatus");
+    
+    // 清理之前的状态
+    if (_statusMap) {
+        [_statusMap removeAllObjects];
+    } else {
+        _statusMap = [NSMutableDictionary dictionary];
+    }
+    _hasUID = NO;
+    _hasMacAddress = NO;
+    _hasWifiStatus = NO;
+    
+    // 顺序执行命令
+    [self sendQueryCommandAtIndex:_currentQueryCommandIndex];
+}
+
+- (void)sendQueryCommandAtIndex:(NSUInteger)index {
+    if (!_isPerformingQueryPipeline || index >= _queryCommandSequence.count) {
+        [self queryPipelineDidComplete];
+        return;
+    }
+    
+    RadarQueryCommand command = (RadarQueryCommand)[_queryCommandSequence[index] unsignedIntegerValue];
+    switch (command) {
+        case RadarQueryCommandUID: {
+            [self sendUIDQuery];
+            break;
+        }
+        case RadarQueryCommandMAC: {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRadarQueryCommandDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self sendMACQuery];
+            });
+            break;
+        }
+        case RadarQueryCommandWifiStatus: {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRadarQueryCommandDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self sendWiFiStatusQuery];
+            });
+            break;
+        }
+        case RadarQueryCommandOperateStatus: {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRadarQueryCommandDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self sendOperationStatusQuery];
+            });
+            break;
+        }
+    }
+}
+
+- (BOOL)isCurrentQueryCommand:(RadarQueryCommand)command {
+    if (!_isPerformingQueryPipeline || _currentQueryCommandIndex >= _queryCommandSequence.count) {
+        return NO;
+    }
+    RadarQueryCommand current = (RadarQueryCommand)[_queryCommandSequence[_currentQueryCommandIndex] unsignedIntegerValue];
+    return current == command;
+}
+
+- (void)advanceQueryPipeline {
+    if (!_isPerformingQueryPipeline) {
+        return;
+    }
+    _currentQueryCommandIndex++;
+    if (_currentQueryCommandIndex >= _queryCommandSequence.count) {
+        [self queryPipelineDidComplete];
+    } else {
+        [self sendQueryCommandAtIndex:_currentQueryCommandIndex];
+    }
+}
+
+- (void)queryPipelineDidComplete {
+    if (!_isPerformingQueryPipeline) {
+        return;
+    }
+    _isPerformingQueryPipeline = NO;
+    
+    // 查询主超时计时器已经完成任务，此处交由 Wi-Fi 扫描计时器管理
+    [_queryTimer invalidate];
+    _queryTimer = nil;
+    
+    __weak typeof(self) weakSelf = self;
+    _wifiScanCompletionBlock = ^(BOOL success) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) { return; }
+        if (!success && !strongSelf->_hasUID && !strongSelf->_hasMacAddress && !strongSelf->_hasWifiStatus) {
+            [strongSelf finishQuery:NO];
+        } else {
+            [strongSelf finishQuery:YES];
+        }
+    };
+    [self startNearbyWiFiScan];
+}
+
+- (void)startNearbyWiFiScan {
+    if (_isScanningNearbyWiFi) {
+        return;
+    }
+    _isScanningNearbyWiFi = YES;
+    RDRLOG(@"Requesting nearby Wi-Fi scan via BluFi");
+    _wifiScanResultsBuffer = [NSMutableArray array];
+    [_wifiScanTimer invalidate];
+    _wifiScanTimer = [NSTimer scheduledTimerWithTimeInterval:kRadarWifiScanTimeout
+                                                     target:self
+                                                   selector:@selector(wifiScanTimedOut)
+                                                   userInfo:nil
+                                                    repeats:NO];
+    @try {
+        [_blufiClient requestDeviceScan];
+    } @catch (NSException *exception) {
+        RDRLOG(@"Failed to request nearby Wi-Fi scan: %@", exception.reason);
+        [self completeNearbyWiFiScanWithResults:nil success:NO];
+    }
+}
+
+- (void)wifiScanTimedOut {
+    NSArray<NSDictionary *> *results = _wifiScanResultsBuffer.count > 0 ? [_wifiScanResultsBuffer copy] : nil;
+    [self completeNearbyWiFiScanWithResults:results success:(results != nil)];
+}
+
+- (void)completeNearbyWiFiScanWithResults:(NSArray<NSDictionary *> *)results success:(BOOL)success {
+    if (!_isScanningNearbyWiFi) {
+        return;
+    }
+    _isScanningNearbyWiFi = NO;
+    [_wifiScanTimer invalidate];
+    _wifiScanTimer = nil;
+    
+    if (results) {
+        [_statusMap setObject:results forKey:@"nearbyWiFiNetworks"];
+        _currentDevice.nearbyWiFiNetworks = results;
+    } else if (!_currentDevice.nearbyWiFiNetworks) {
+        _currentDevice.nearbyWiFiNetworks = @[];
+    }
+    _wifiScanResultsBuffer = nil;
+    
+    if (_wifiScanCompletionBlock) {
+        _wifiScanCompletionBlock(success);
+    } else {
+        if (success || _hasUID || _hasMacAddress || _hasWifiStatus) {
+            [self finishQuery:YES];
+        } else {
+            [self finishQuery:NO];
+        }
+    }
+    _wifiScanCompletionBlock = nil;
+}
 
 /**
  * 处理查询完成
@@ -1077,111 +1296,135 @@
     if (_isQueryComplete) return;
     
     _isQueryComplete = YES;
+    _isPerformingQueryPipeline = NO;
+    
+    DeviceInfo *resultDevice = _currentDevice;
     
     // 更新设备信息
     if (success) {
         // 更新UID
         if (_statusMap[@"uid"]) {
-            _currentDevice.uid = _statusMap[@"uid"];
+            resultDevice.uid = _statusMap[@"uid"];
         }
         
         // 更新MAC地址
         if (_statusMap[@"macAddress"]) {
-            _currentDevice.macAddress = _statusMap[@"macAddress"];
+            resultDevice.macAddress = _statusMap[@"macAddress"];
         }
         
         // 更新WiFi状态
         if (_statusMap[@"wifiOpMode"]) {
-            _currentDevice.wifiMode = _statusMap[@"wifiOpMode"];
+            resultDevice.wifiMode = _statusMap[@"wifiOpMode"];
         }
         
         if (_statusMap[@"staConnected"]) {
-            _currentDevice.wifiConnected = [_statusMap[@"staConnected"] boolValue];
+            resultDevice.wifiConnected = [_statusMap[@"staConnected"] boolValue];
         }
         
         if (_statusMap[@"staSSID"]) {
-            _currentDevice.wifiSsid = _statusMap[@"staSSID"];
+            resultDevice.wifiSsid = _statusMap[@"staSSID"];
+        }
+        
+        if (_statusMap[@"radarRunStatus"]) {
+            resultDevice.radarRunStatus = _statusMap[@"radarRunStatus"];
+        }
+        
+        if (_statusMap[@"nearbyWiFiNetworks"]) {
+            resultDevice.nearbyWiFiNetworks = _statusMap[@"nearbyWiFiNetworks"];
+        } else if (!resultDevice.nearbyWiFiNetworks) {
+            resultDevice.nearbyWiFiNetworks = @[];
         }
         
         // 更新时间戳
-        _currentDevice.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
+        resultDevice.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
     }
     
     // 通知回调
     if (_queryCallback) {
+        DeviceInfo *callbackDevice = resultDevice;
         dispatch_async(dispatch_get_main_queue(), ^{
-            self->_queryCallback(self->_currentDevice, success);
+            if (self->_queryCallback) {
+                self->_queryCallback(callbackDevice, success);
+                self->_queryCallback = nil;
+            }
         });
     }
     
     // 清理状态
     [_queryTimer invalidate];
     _queryTimer = nil;
+    [_wifiScanTimer invalidate];
+    _wifiScanTimer = nil;
+    _wifiScanCompletionBlock = nil;
+    _isScanningNearbyWiFi = NO;
     _statusMap = nil;
+    if (!_isConfiguring) {
+        _currentDevice = nil;
+        _currentPeripheral = nil;
+        _currentDeviceUUID = nil;
+    }
 }
 
 /**
  * 处理UID响应
  */
 - (void)handleUIDResponse:(NSString *)responseStr {
+    if (![self isCurrentQueryCommand:RadarQueryCommandUID]) {
+        return;
+    }
     NSArray *parts = [responseStr componentsSeparatedByString:@":"];
     if (parts.count >= 2) {
         NSString *uid = [parts objectAtIndex:1];
         uid = [uid stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        
-        // 保存UID
-        [_statusMap setObject:uid forKey:@"uid"];
-        _hasUID = YES;
-        
-        //RDRLOG(@"Received device UID");
-        
-        // 继续查询MAC地址
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self sendMACQuery];
-        });
-    } else {
-        //RDRLOG(@"Invalid UID response format");
-        
-        // 继续查询MAC地址，不中断流程
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self sendMACQuery];
-        });
+        if (uid.length > 0) {
+            [_statusMap setObject:uid forKey:@"uid"];
+            _hasUID = YES;
+            RDRLOG(@"Received UID response: %@", uid);
+        }
     }
+    [self advanceQueryPipeline];
 }
 
 /**
  * 处理MAC地址响应
  */
 - (void)handleMACResponse:(NSString *)responseStr {
+    if (![self isCurrentQueryCommand:RadarQueryCommandMAC]) {
+        return;
+    }
     NSArray *parts = [responseStr componentsSeparatedByString:@":"];
-    if (parts.count >= 3 && [@"0" isEqualToString:[parts objectAtIndex:1]]) {
-        NSString *macAddress = [parts objectAtIndex:2];
-        macAddress = [macAddress stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        
-        // 保存MAC地址
+    NSString *macAddress = nil;
+    if (parts.count >= 3 && [parts[2] length] > 0) {
+        macAddress = parts[2];
+    } else if (parts.count >= 2 && [parts[1] length] > 0) {
+        macAddress = parts[1];
+    }
+    if (!macAddress || macAddress.length == 0) {
+        // fall back to substring after first colon to keep compatibility
+        NSRange range = [responseStr rangeOfString:@":"];
+        if (range.location != NSNotFound && range.location + 1 < responseStr.length) {
+            macAddress = [responseStr substringFromIndex:range.location + 1];
+        }
+    }
+    
+    macAddress = [macAddress stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (macAddress.length > 0) {
         [_statusMap setObject:macAddress forKey:@"macAddress"];
         _hasMacAddress = YES;
-        
-        //RDRLOG(@"Received device MAC address");
-        
-        // 继续查询WiFi状态
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self sendWiFiStatusQuery];
-        });
+        RDRLOG(@"Received MAC address response: %@", macAddress);
     } else {
-        //RDRLOG(@"Invalid MAC address response format");
-        
-        // 继续查询WiFi状态，不中断流程
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self sendWiFiStatusQuery];
-        });
+        RDRLOG(@"MAC response did not contain valid address: %@", responseStr);
     }
+    [self advanceQueryPipeline];
 }
 
 /**
  * 处理WiFi状态响应
  */
 - (void)handleWiFiStatusResponse:(NSArray *)parts {
+    if (![self isCurrentQueryCommand:RadarQueryCommandWifiStatus]) {
+        return;
+    }
     if (parts.count >= 3) {
         NSString *mode = [parts objectAtIndex:1];
         BOOL connected = [@"0" isEqualToString:[parts objectAtIndex:2]];
@@ -1207,46 +1450,61 @@
         }
         
         _hasWifiStatus = YES;
-        
-        //RDRLOG(@"Received WiFi status: mode=%@, connected=%d, SSID=%@", wifiMode, connected, ssid ?: @"Unknown");
-        
-        // 查询完成，通知结果
-        [self finishQuery:YES];
-    } else {
-        //RDRLOG(@"Invalid WiFi status response format");
-        
-        // 查询不完整，但仍然返回结果
-        [self finishQuery:(_hasUID || _hasMacAddress)];
+        RDRLOG(@"Received Wi-Fi status response: mode=%@, connected=%d, ssid=%@", wifiMode, connected, ssid ?: @"");
     }
+    [self advanceQueryPipeline];
+}
+
+- (void)handleOperationStatusResponse:(NSString *)responseStr {
+    if (![self isCurrentQueryCommand:RadarQueryCommandOperateStatus]) {
+        return;
+    }
+    NSString *statusValue = nil;
+    NSRange range = [responseStr rangeOfString:@":"];
+    if (range.location != NSNotFound && range.location + 1 < responseStr.length) {
+        statusValue = [[responseStr substringFromIndex:range.location + 1]
+                       stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    } else {
+        statusValue = [responseStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    }
+    if (statusValue.length > 0) {
+        [_statusMap setObject:statusValue forKey:@"radarRunStatus"];
+        RDRLOG(@"Received operate status response: %@", statusValue);
+    } else {
+        RDRLOG(@"Operate status response empty: %@", responseStr);
+    }
+    [self advanceQueryPipeline];
 }
 
 /**
  * 处理 WiFi 状态查询结果
  */
 - (void)handleWiFiStatusResponse:(NSString *)wifiMode connected:(BOOL)connected ssid:(NSString *)ssid {
-    //RDRLOG(@"Received WiFi status: mode=%@, connected=%d, SSID=%@", wifiMode, connected, ssid);
     _currentDevice.wifiMode = wifiMode;
     _currentDevice.wifiConnected = connected;
     _currentDevice.wifiSsid = ssid;
-    
-    // 所有查询完成，回调结果
-    if (_queryCallback) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            //RDRLOG(@"Query completed, notifying main thread.");
-            self->_queryCallback(self->_currentDevice, YES);
-            self->_queryCallback = nil;
-        });
+    if (wifiMode) {
+        [_statusMap setObject:wifiMode forKey:@"wifiOpMode"];
     }
-    
-    // 断开连接
-    //[self disconnect];
-	//RDRLOG(@"Query completed, keeping connection active until timeout.");
+    [_statusMap setObject:@(connected) forKey:@"staConnected"];
+    if (ssid) {
+        [_statusMap setObject:ssid forKey:@"staSSID"];
+    }
+    if ([self isCurrentQueryCommand:RadarQueryCommandWifiStatus]) {
+        _hasWifiStatus = YES;
+        [self advanceQueryPipeline];
+    }
 }
 
 /**
  * 自定义数据响应处理 - 处理所有查询命令的响应
  */
 - (void)blufi:(BlufiClient *)client didReceiveCustomData:(NSData *)data status:(BlufiStatusCode)status {
+    if (data) {
+        RDRLOG(@"didReceiveCustomData status=%d length=%lu", status, (unsigned long)data.length);
+    } else {
+        RDRLOG(@"didReceiveCustomData status=%d data=NULL", status);
+    }
     if (status != StatusSuccess || !data) {
         //RDRLOG(@"Failed to receive custom data: status=%d", status);
 
@@ -1259,17 +1517,27 @@
 
     // 将接收到的数据转换为字符串
     NSString *responseStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    //RDRLOG(@"Received custom data: %@", responseStr);
+    RDRLOG(@"Received custom data raw: %@", responseStr);
 
     // 检查响应是否包含分隔符 ":"
-    if (![responseStr containsString:@":"]) {
-        //RDRLOG(@"Invalid response format: missing separator ':'");
+    BOOL expectingOperateStatus = [self isCurrentQueryCommand:RadarQueryCommandOperateStatus];
+    NSArray *parts = nil;
+    NSInteger command = -1;
+    
+    if ([responseStr containsString:@":"]) {
+        parts = [responseStr componentsSeparatedByString:@":"];
+        command = [[parts objectAtIndex:0] integerValue];
+    } else if (expectingOperateStatus) {
+        NSString *trimmed = [responseStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (trimmed.length > 0) {
+            [_statusMap setObject:trimmed forKey:@"radarRunStatus"];
+            RDRLOG(@"Received operate status response (raw): %@", trimmed);
+        }
+        [self advanceQueryPipeline];
+        return;
+    } else {
         return;
     }
-
-    // 分割响应字符串
-    NSArray *parts = [responseStr componentsSeparatedByString:@":"];
-    NSInteger command = [[parts objectAtIndex:0] integerValue]; // 解析命令类型
 
     // 根据命令类型处理响应
     switch (command) {
@@ -1291,6 +1559,12 @@
             // 主要用于查询
             if (_queryCallback && !_isQueryComplete) {
                 [self handleWiFiStatusResponse:parts];
+            }
+            break;
+            
+        case 10: // 运行状态
+            if (_queryCallback && !_isQueryComplete) {
+                [self handleOperationStatusResponse:responseStr];
             }
             break;
             
@@ -1378,17 +1652,48 @@
             // 标记 WiFi 状态已获取
             _hasWifiStatus = YES;
             
-            // 查询完成，返回结果
-            [self finishQuery:YES];
+            [self advanceQueryPipeline];
         } else {
             // WiFi 状态查询失败
             [_statusMap setObject:@"Failed to get status" forKey:@"wifiError"];
             
             //RDRLOG(@"Failed to get device WiFi status: %d", status);
-            
-            // 查询不完整，但仍然尝试返回部分结果
-            [self finishQuery:(_hasUID || _hasMacAddress)];
+            [self advanceQueryPipeline];
         }
+    }
+}
+
+- (void)blufi:(BlufiClient *)client didReceiveDeviceScanResponse:(nullable NSArray<BlufiScanResponse *> *)scanResults status:(BlufiStatusCode)status {
+    if (!_isScanningNearbyWiFi) {
+        return;
+    }
+    if (status != StatusSuccess || !scanResults) {
+        RDRLOG(@"Nearby Wi-Fi scan failed with status=%d", status);
+        [self completeNearbyWiFiScanWithResults:nil success:NO];
+        return;
+    }
+    
+    BOOL shouldFinalize = NO;
+    for (BlufiScanResponse *item in scanResults) {
+        if (item.ssid.length > 0) {
+            NSDictionary *entry = @{
+                @"ssid": item.ssid ?: @"",
+                @"rssi": @(item.rssi)
+            };
+            [_wifiScanResultsBuffer addObject:entry];
+            RDRLOG(@"Nearby Wi-Fi scan result: ssid=%@ rssi=%d type=%d", item.ssid, item.rssi, item.type);
+        }
+        if (item.type == 0) {
+            shouldFinalize = YES;
+        }
+    }
+    
+    if (shouldFinalize) {
+        NSArray<NSDictionary *> *results = _wifiScanResultsBuffer.count > 0 ? [_wifiScanResultsBuffer copy] : @[];
+        RDRLOG(@"Nearby Wi-Fi scan completed with %lu entries", (unsigned long)results.count);
+        [self completeNearbyWiFiScanWithResults:results success:YES];
+    } else {
+        // 等待更多数据
     }
 }
 

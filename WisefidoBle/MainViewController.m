@@ -1015,42 +1015,82 @@
     }
     if (device.macAddress) {
         [info appendFormat:@"macAddress:%@\n", device.macAddress];
+    } else {
+        [info appendString:@"macAddress:\n"];
     }
     if (device.uuid) {
         [info appendFormat:@"uuid:%@\n", device.uuid];
     }
     if (device.rssi != -255) {
-        [info appendFormat:@"rssi:%lddBm\n", (long)device.rssi];
+        [info appendFormat:@"BLErssi:%lddBm\n", (long)device.rssi];
     }
 
-    // WiFi configuration
-    if (device.wifiSsid.length > 0) {
-        [info appendFormat:@"wifimode:%@   wifiRssi:%@\n",
-                           device.wifiMode ?: @"",
-                           device.wifiSignal == -255 ? @"-255,not signal" : @(device.wifiSignal)];
-        [info appendFormat:@"wifissid:%@   wifiPasswd:%@\n",
-                           device.wifiSsid ?: @"____",
-                           device.wifiPassword ?: @"_____"];
-    } else {
-        [info appendString:@"wifimode:noConfig   wifiRssi:-255,not signal\n"];
+    // Wi-Fi information
+    NSString *displayWifiMode = device.wifiMode.length > 0 ? device.wifiMode : nil;
+    NSInteger displayWifiSignal = device.wifiSignal;
+    NSString *displayWifiSsid = device.wifiSsid.length > 0 ? device.wifiSsid : @"";
+    
+    if (displayWifiSignal == -255 && device.nearbyWiFiNetworks.count > 0) {
+        NSDictionary *matchedEntry = nil;
+        if (displayWifiSsid.length > 0) {
+            for (NSDictionary *entry in device.nearbyWiFiNetworks) {
+                if ([displayWifiSsid isEqualToString:entry[@"ssid"]]) {
+                    matchedEntry = entry;
+                    break;
+                }
+            }
+        }
+        if (!matchedEntry) {
+            matchedEntry = device.nearbyWiFiNetworks.firstObject;
+        }
+        NSNumber *rssiValue = matchedEntry[@"rssi"];
+        if ([rssiValue isKindOfClass:[NSNumber class]]) {
+            displayWifiSignal = [rssiValue integerValue];
+        }
     }
-
-    // Server configuration
-    [info appendFormat:@"serverConnect:%@\n", device.serverConnected ? @"Yes" : @"NO"];
-    if (device.serverConnected) {
-        [info appendFormat:@"serverConfig: serverADD:%@%@%ld\n",
-                           device.serverAddress ?: @"",
-                           device.serverProtocol ?: @"",
-                           (long)(device.serverPort ?: 0)];
+    if (displayWifiSignal == 0) {
+        displayWifiSignal = -255;
+    }
+    
+    if (device.wifiMode.length == 0 && displayWifiMode.length > 0) {
+        device.wifiMode = displayWifiMode;
+    }
+    if (device.wifiSignal == -255 && displayWifiSignal != -255) {
+        device.wifiSignal = displayWifiSignal;
+    }
+    [info appendFormat:@"wifiMode:%@   wifiRssi:%@\n",
+                       displayWifiMode.length > 0 ? displayWifiMode : @"Unknown",
+                       displayWifiSignal == -255 ? @"-255,not signal" : @(displayWifiSignal)];
+    if (displayWifiSsid.length > 0) {
+        [info appendFormat:@"wifiSsid:%@\n", displayWifiSsid];
     } else {
-        [info appendString:@"serverConfig:\n"];
+        [info appendString:@"wifiSsid:\n"];
+    }
+    
+    // Radar run status
+    if (device.radarRunStatus.length > 0) {
+        [info appendFormat:@"radarRunStatus:%@\n", device.radarRunStatus];
+    }
+    
+    // Nearby Wi-Fi networks
+    if (device.nearbyWiFiNetworks.count > 0) {
+        [info appendString:@"nearbyWiFi:\n"];
+        NSInteger index = 1;
+        for (NSDictionary *entry in device.nearbyWiFiNetworks) {
+            NSString *ssid = entry[@"ssid"] ?: @"";
+            NSNumber *rssiNumber = entry[@"rssi"];
+            NSString *rssiString = [rssiNumber isKindOfClass:[NSNumber class]] ? [NSString stringWithFormat:@"%@", rssiNumber] : @"";
+            [info appendFormat:@"  %ld. %@ (RSSI:%@ dBm)\n", (long)index, ssid, rssiString];
+            index++;
+        }
+    } else {
+        [info appendString:@"nearbyWiFi:\n"];
     }
 
     // Extension area
     if (device.version) {
         [info appendFormat:@"version:%@\n", device.version];
     }
-    // 这里有一个多余的大括号，已删除
     if (device.lastUpdateTime > 0) {
         NSDate *date = [NSDate dateWithTimeIntervalSince1970:device.lastUpdateTime];
         NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
