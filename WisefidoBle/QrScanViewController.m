@@ -37,7 +37,7 @@
     _titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_titleLabel];
 
-    // 取景框：高约屏幕 40%，与 Android 扫码窗一致
+    // 取景框：高约屏幕 26%，面板贴顶显示（单手好够）
     _previewContainer = [[UIView alloc] init];
     _previewContainer.backgroundColor = [UIColor blackColor];
     _previewContainer.layer.cornerRadius = 8.0;
@@ -61,7 +61,7 @@
     _closeButton.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_closeButton];
 
-    CGFloat previewHeight = floor(UIScreen.mainScreen.bounds.size.height * 0.4);
+    CGFloat previewHeight = floor(UIScreen.mainScreen.bounds.size.height * 0.26);
     [NSLayoutConstraint activateConstraints:@[
         [_titleLabel.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16],
         [_titleLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
@@ -79,6 +79,8 @@
         [_closeButton.topAnchor constraintEqualToAnchor:_hintLabel.bottomAnchor constant:8],
         [_closeButton.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [_closeButton.heightAnchor constraintEqualToConstant:44],
+        // 面板高度由内容决定（作为顶部浮层，父视图只约束 top/leading/trailing）
+        [self.view.bottomAnchor constraintEqualToAnchor:_closeButton.bottomAnchor constant:12],
     ]];
 }
 
@@ -181,8 +183,31 @@
 }
 
 - (void)handleClose {
+    [self closeAnimated:YES completion:nil];
+}
+
+- (void)closeAnimated:(BOOL)animated completion:(void (^)(void))completion {
     [self stopSession];
-    [self dismissViewControllerAnimated:YES completion:nil];
+    if (self.parentViewController) {
+        // 作为顶部子控制器：上滑并淡出后移除
+        UIView *panel = self.view;
+        void (^finish)(void) = ^{
+            [self willMoveToParentViewController:nil];
+            [panel removeFromSuperview];
+            [self removeFromParentViewController];
+            if (completion) completion();
+        };
+        if (animated) {
+            [UIView animateWithDuration:0.22 animations:^{
+                panel.transform = CGAffineTransformMakeTranslation(0, -panel.bounds.size.height);
+                panel.alpha = 0;
+            } completion:^(BOOL done) { finish(); }];
+        } else {
+            finish();
+        }
+    } else {
+        [self dismissViewControllerAnimated:animated completion:completion];
+    }
 }
 
 #pragma mark - AVCaptureMetadataOutputObjectsDelegate
@@ -201,7 +226,7 @@ didOutputMetadataObjects:(NSArray<__kindof AVMetadataObject *> *)metadataObjects
         [self stopSession];
         // 先关扫码页再回调，避免主页面在 dismiss 过程中弹 alert；闭包强持有 self 保证回调执行
         id<QrScanViewControllerDelegate> delegate = self.delegate;
-        [self dismissViewControllerAnimated:YES completion:^{
+        [self closeAnimated:YES completion:^{
             [delegate qrScanViewController:self didScanCode:text];
         }];
         return;

@@ -33,6 +33,7 @@
 @property (nonatomic, strong) UIButton *pairButton;
 @property (nonatomic, strong) UIButton *queryButton;
 @property (nonatomic, strong) UIButton *searchButton;
+@property (nonatomic, weak, nullable) QrScanViewController *activeQrVC; // 顶部扫码面板
 @property (nonatomic, strong) UIButton *qrScanButton;      // STEP 1 行：扫码匹配
 @property (nonatomic, strong) UILabel *deviceHintLabel;    // "Select device ID"
 @property (nonatomic, strong) UIView *serverHistoryRow;    // Recent Servers + TLS 开关
@@ -1264,19 +1265,37 @@ static const NSTimeInterval kQrMatchTotalTimeout = 10.0;   // 总超时
 
 - (void)handleQrScanButton:(id)sender {
     [self stopQrMatch];
+    if (self.activeQrVC.parentViewController) { // 面板仍挂在界面上就不重复弹
+        return;
+    }
+    // 顶部浮层（不用底部 sheet：单手操作时底部不顺手），与 Android 顶部扫码小窗一致
     QrScanViewController *qrVC = [[QrScanViewController alloc] init];
     qrVC.delegate = self;
-    qrVC.modalPresentationStyle = UIModalPresentationPageSheet;
-    UISheetPresentationController *sheet = qrVC.sheetPresentationController;
-    if (sheet) {
-        sheet.detents = @[[UISheetPresentationControllerDetent mediumDetent]];
-        sheet.prefersGrabberVisible = YES;
-    }
+    [self addChildViewController:qrVC];
+    UIView *panel = qrVC.view;
+    panel.translatesAutoresizingMaskIntoConstraints = NO;
+    panel.layer.cornerRadius = 16;
+    panel.layer.maskedCorners = kCALayerMinXMaxYCorner | kCALayerMaxXMaxYCorner;
+    panel.layer.shadowColor = UIColor.blackColor.CGColor;
+    panel.layer.shadowOpacity = 0.25;
+    panel.layer.shadowRadius = 8;
+    panel.layer.shadowOffset = CGSizeMake(0, 3);
+    [self.view addSubview:panel];
+    [NSLayoutConstraint activateConstraints:@[
+        [panel.topAnchor constraintEqualToAnchor:self.view.topAnchor],
+        [panel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [panel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+    ]];
+    [qrVC didMoveToParentViewController:self];
+    self.activeQrVC = qrVC;
+    [self.view layoutIfNeeded];
+    panel.transform = CGAffineTransformMakeTranslation(0, -panel.bounds.size.height);
+    [UIView animateWithDuration:0.25 animations:^{ panel.transform = CGAffineTransformIdentity; }];
     [self showMessage:@"Scan device QR code"];
-    [self presentViewController:qrVC animated:YES completion:nil];
 }
 
 - (void)qrScanViewController:(QrScanViewController *)controller didScanCode:(NSString *)code {
+    self.activeQrVC = nil;
     [self startQrMatch:code];
 }
 
