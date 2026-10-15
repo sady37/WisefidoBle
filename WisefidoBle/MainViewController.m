@@ -206,7 +206,7 @@
     [self.view addSubview:_deviceInfoView];
 
     _deviceIdLabel = [[UILabel alloc] init];
-    _deviceIdLabel.text = @"No ID";
+    _deviceIdLabel.text = @"No Device";
     _deviceIdLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
     _deviceIdLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [_deviceInfoView addSubview:_deviceIdLabel];
@@ -215,6 +215,7 @@
     _deviceNameLabel.text = @"No Device";
     _deviceNameLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
     _deviceNameLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _deviceNameLabel.hidden = YES; // 保留属性以兼容旧代码，界面不显示
     [_deviceInfoView addSubview:_deviceNameLabel];
 
     _deviceRssiLabel = [[UILabel alloc] init];
@@ -389,16 +390,12 @@
         [_deviceInfoView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_deviceInfoView.heightAnchor constraintEqualToConstant:60],
 
-        [_deviceNameLabel.leadingAnchor constraintEqualToAnchor:_deviceInfoView.leadingAnchor constant:16],
-        [_deviceNameLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
+        // 与 Android 一致：只显示设备 ID（左）+ 信号强度（右），不再单独显示设备名
+        [_deviceIdLabel.leadingAnchor constraintEqualToAnchor:_deviceInfoView.leadingAnchor constant:16],
         [_deviceIdLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
         [_deviceRssiLabel.trailingAnchor constraintEqualToAnchor:_deviceInfoView.trailingAnchor constant:-16],
         [_deviceRssiLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
-        // 按5/3/2比例分配空间
-        [_deviceNameLabel.widthAnchor constraintEqualToAnchor:_deviceInfoView.widthAnchor multiplier:0.5],
-        [_deviceRssiLabel.widthAnchor constraintEqualToAnchor:_deviceInfoView.widthAnchor multiplier:0.2],
-        [_deviceIdLabel.leadingAnchor constraintEqualToAnchor:_deviceNameLabel.trailingAnchor],
-        [_deviceRssiLabel.leadingAnchor constraintEqualToAnchor:_deviceIdLabel.trailingAnchor],
+        [_deviceRssiLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:_deviceIdLabel.trailingAnchor constant:8],
     ]];
 
     // STEP 2：标题、说明、地址/端口
@@ -718,21 +715,17 @@
 - (void)updateDeviceInfo:(nullable DeviceInfo *)deviceInfo {
     if (!deviceInfo) {
         // 如果 deviceInfo 为空，显示默认值
-        self.deviceNameLabel.text = @"No Device";
-        self.deviceIdLabel.text = @"No ID";
+        self.deviceNameLabel.text = @"";
+        self.deviceIdLabel.text = @"No Device";
         self.deviceRssiLabel.text = @"--";
         [self updateActionButtonsState];
         return;
     }
-    // 获取设备ID的最后4位
-    NSString *displayId = deviceInfo.deviceId.length > 4 ? 
-        [deviceInfo.deviceId substringFromIndex:deviceInfo.deviceId.length - 4] : 
-        deviceInfo.deviceId;
-
-    // 更新设备信息
-    self.deviceNameLabel.text = deviceInfo.deviceName ? [NSString stringWithFormat:@"Name: %@", deviceInfo.deviceName] : @"Name: Unknown";
-    self.deviceIdLabel.text = [NSString stringWithFormat:@"%@", displayId];
-    self.deviceRssiLabel.text = [NSString stringWithFormat:@"RSSI: %ld dBm", (long)deviceInfo.rssi];
+    // 与 Android 一致：显示完整设备 ID（无则退回设备名）+ 信号强度
+    NSString *displayId = deviceInfo.deviceId.length > 0 ? deviceInfo.deviceId : (deviceInfo.deviceName ?: @"Unknown");
+    self.deviceNameLabel.text = deviceInfo.deviceName ?: @"";
+    self.deviceIdLabel.text = displayId;
+    self.deviceRssiLabel.text = [NSString stringWithFormat:@"%lddBm", (long)deviceInfo.rssi];
     [self updateActionButtonsState];
 }
 //#pragma mark - 设置按钮处理
@@ -1182,21 +1175,17 @@
 
 - (void)updateDeviceDisplay:(DeviceInfo *)device {
     if (!device) {
-        self.deviceNameLabel.text = @"No Device";
-        self.deviceIdLabel.text = @"No ID";
+        self.deviceNameLabel.text = @"";
+        self.deviceIdLabel.text = @"No Device";
         self.deviceRssiLabel.text = @"--";
         [self updateActionButtonsState];
         return;
     }
 
-        // 获取设备ID的最后4位
-    NSString *displayId = device.deviceId.length > 4 ? [device.deviceId substringFromIndex:device.deviceId.length - 4] :
-    device.deviceId;
-    
-    // 更新设备信息显示
-    self.deviceNameLabel.text = device.deviceName;
-    //self.deviceIdLabel.text = device.deviceId;
-    self.deviceIdLabel.text = [NSString stringWithFormat:@"%@", displayId];
+    // 与 Android 一致：显示完整设备 ID（无则退回设备名）
+    NSString *displayId = device.deviceId.length > 0 ? device.deviceId : (device.deviceName ?: @"Unknown");
+    self.deviceNameLabel.text = device.deviceName ?: @"";
+    self.deviceIdLabel.text = displayId;
     self.deviceRssiLabel.text = [NSString stringWithFormat:@"%lddBm", (long)device.rssi];
     [self updateActionButtonsState];
 }
