@@ -1,6 +1,7 @@
 WisefidoBle
 20250402   v1.0  完成sleepBoard scan/config,Esp scan/config/query
 20251112   v1.1  重建Radar查询/配置：添加预热流程、查询管线和ESP独立Wi-Fi扫描；完善主界面状态显示与历史记录体验。
+20261015   v1.2  同步 Android 版 UI/QR：主页改 STEP 1/2/3 布局；STEP 1 行加 QR 扫码按钮，扫到码后自动匹配设备（BM 开头走 Sleepace，其它走雷达；3 秒未命中用 TSBLU+后 6 位回退，10 秒超时）；Recent Servers 行加 TLS Encryption 开关（自动填 29015/29010，iOS Sleepace SDK 无 portEncrypt 参数只靠端口）；Query/Pair 无设备时置灰；雷达扫描去重缓存每次扫描清空（修二次扫描扫不到）。新增 QrScanViewController（AVFoundation），Info.plist 加 NSCameraUsageDescription。
                  
 
 

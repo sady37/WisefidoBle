@@ -4,6 +4,8 @@
 <dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>WisefidoBle requires Bluetooth to scan and configure Wisefido devices</string>
+	<key>NSCameraUsageDescription</key>
+	<string>WisefidoBle uses the camera to scan the QR code on a device</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSBonjourServices</key>

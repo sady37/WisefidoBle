@@ -571,6 +571,12 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
 // 实际开始扫描的内部方法
 - (void)startActualScan:(NSTimeInterval)timeout {
     //RDRLOG(@"Starting scan: timeout=%.1fs",timeout);
+
+    // 每次开始扫描先清空去重缓存：否则同一设备在本次 App 生命周期内只上报一次，
+    // 二次 BLE 扫描 / 扫码匹配会扫不到已见过的设备
+    @synchronized(_peripheralCache) {
+        [_peripheralCache removeAllObjects];
+    }
     
     // 设置扫描标志
     _isScanning = YES;
