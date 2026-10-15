@@ -22,6 +22,8 @@
 @property (nonatomic, strong) UILabel *deviceNameLabel;
 @property (nonatomic, strong) UILabel *deviceIdLabel;
 @property (nonatomic, strong) UILabel *deviceRssiLabel;
+@property (nonatomic, strong) UILabel *deviceUidLabel;        // 设备栏中间：QR 码或 MAC
+@property (nonatomic, copy, nullable) NSString *selectedQrCode; // QR 匹配选中时记录原始 QR 码
 
 @property (nonatomic, strong) UITextField *serverAddressTextField;
 @property (nonatomic, strong) UITextField *serverPortTextField;
@@ -35,7 +37,6 @@
 @property (nonatomic, strong) UIButton *searchButton;
 @property (nonatomic, weak, nullable) QrScanViewController *activeQrVC; // 顶部扫码面板
 @property (nonatomic, strong) UIButton *qrScanButton;      // STEP 1 行：扫码匹配
-@property (nonatomic, strong) UILabel *deviceHintLabel;    // "Select device ID"
 @property (nonatomic, strong) UIView *serverHistoryRow;    // Recent Servers + TLS 开关
 @property (nonatomic, strong) UILabel *tlsLabel;
 @property (nonatomic, strong) UISwitch *tlsSwitch;
@@ -46,6 +47,7 @@
 @property (nonatomic, assign) BOOL qrMatching;
 @property (nonatomic, copy) NSString *qrMatchCode;
 @property (nonatomic, copy) NSString *qrOriginalCode;
+@property (nonatomic, strong) NSMutableSet<NSString *> *qrSeenDevices; // 本次匹配中已打印到状态栏的设备
 @property (nonatomic, strong, nullable) NSTimer *qrStage1Timer;
 @property (nonatomic, strong, nullable) NSTimer *qrTimeoutTimer;
 @property (nonatomic, strong, nullable) UIAlertController *qrProgressAlert;
@@ -141,12 +143,24 @@
 
 
 #pragma mark - 初始化UI
+/// Android 同款 SVG（intrinsic 200pt）缩放到 header 图标尺寸，保持模板着色
+- (UIImage *)headerIconNamed:(NSString *)name {
+    const CGFloat side = 26;
+    UIImage *src = [UIImage imageNamed:name];
+    if (!src) return nil;
+    UIGraphicsImageRenderer *r = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)];
+    UIImage *img = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        [src drawInRect:CGRectMake(0, 0, side, side)];
+    }];
+    return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
 - (void)setupViews {
     // ------------ 标题和背景 ------------
     self.title = @"BLE WiFi Config";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
 
-    // ------------ STEP 1 行：STEP 1 | Query | (spacer) | QR | BLE ------------
+    // ------------ STEP 1 行：STEP 1 | (spacer) | QR | BLE ------------
     _headerStackView = [[UIStackView alloc] init];
     _headerStackView.axis = UILayoutConstraintAxisHorizontal;
     _headerStackView.distribution = UIStackViewDistributionFill;
@@ -163,14 +177,6 @@
     [_deviceTitleLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
     [_headerStackView addArrangedSubview:_deviceTitleLabel];
 
-    // Query 按钮
-    _queryButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_queryButton setTitle:@"Query" forState:UIControlStateNormal];
-    _queryButton.layer.cornerRadius = 20.0;
-    _queryButton.backgroundColor = [UIColor systemGreenColor];
-    [_queryButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
-    [_headerStackView addArrangedSubview:_queryButton];
-
     // 自适应填充空格的 UIView
     UIView *spacerView = [[UIView alloc] init];
     [spacerView setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
@@ -179,23 +185,15 @@
 
     // QR 扫码按钮
     _qrScanButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_qrScanButton setImage:[UIImage systemImageNamed:@"qrcode.viewfinder"] forState:UIControlStateNormal];
+    [_qrScanButton setImage:[self headerIconNamed:@"QRScan"] forState:UIControlStateNormal];
     _qrScanButton.accessibilityLabel = @"QRScan";
     [_headerStackView addArrangedSubview:_qrScanButton];
 
     // BLE 扫描按钮
     _searchButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_searchButton setImage:[UIImage systemImageNamed:@"antenna.radiowaves.left.and.right"] forState:UIControlStateNormal];
+    [_searchButton setImage:[self headerIconNamed:@"BleScan"] forState:UIControlStateNormal];
     _searchButton.accessibilityLabel = @"BleScan";
     [_headerStackView addArrangedSubview:_searchButton];
-
-    // 提示
-    _deviceHintLabel = [[UILabel alloc] init];
-    _deviceHintLabel.text = @"Select device ID";
-    _deviceHintLabel.font = [UIFont systemFontOfSize:14];
-    _deviceHintLabel.textColor = [UIColor systemGrayColor];
-    _deviceHintLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_deviceHintLabel];
 
     // ------------ 设备信息区域 ------------
     _deviceInfoView = [[UIView alloc] init];
@@ -207,7 +205,8 @@
     [self.view addSubview:_deviceInfoView];
 
     _deviceIdLabel = [[UILabel alloc] init];
-    _deviceIdLabel.text = @"No Device";
+    _deviceIdLabel.text = @"Scan QR or BLE to select device";
+    _deviceIdLabel.textColor = [UIColor systemGrayColor];
     _deviceIdLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
     _deviceIdLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [_deviceInfoView addSubview:_deviceIdLabel];
@@ -219,11 +218,25 @@
     _deviceNameLabel.hidden = YES; // 保留属性以兼容旧代码，界面不显示
     [_deviceInfoView addSubview:_deviceNameLabel];
 
+    _deviceUidLabel = [[UILabel alloc] init];
+    _deviceUidLabel.text = @"";
+    _deviceUidLabel.font = [UIFont systemFontOfSize:14];
+    _deviceUidLabel.textColor = [UIColor systemGrayColor];
+    _deviceUidLabel.textAlignment = NSTextAlignmentCenter;
+    _deviceUidLabel.adjustsFontSizeToFitWidth = YES;
+    _deviceUidLabel.minimumScaleFactor = 0.75;
+    _deviceUidLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [_deviceInfoView addSubview:_deviceUidLabel];
+
     _deviceRssiLabel = [[UILabel alloc] init];
-    _deviceRssiLabel.text = @"--";
+    _deviceRssiLabel.text = @"";
     _deviceRssiLabel.font = [UIFont systemFontOfSize:14];
     _deviceRssiLabel.textColor = [UIColor systemGrayColor];
     _deviceRssiLabel.textAlignment = NSTextAlignmentRight;
+    [_deviceRssiLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_deviceRssiLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_deviceIdLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    [_deviceIdLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
     _deviceRssiLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [_deviceInfoView addSubview:_deviceRssiLabel];
 
@@ -235,7 +248,7 @@
     [self.view addSubview:_configTitle];
 
     _serverInfoLabel = [[UILabel alloc] init];
-    _serverInfoLabel.text = @"Server information to be connected by the device";
+    _serverInfoLabel.text = @"Server address the device will connect to";
     _serverInfoLabel.font = [UIFont systemFontOfSize:14];
     _serverInfoLabel.textColor = [UIColor systemGrayColor];
     _serverInfoLabel.translatesAutoresizingMaskIntoConstraints = NO;
@@ -282,7 +295,7 @@
     _tlsLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [_serverHistoryRow addSubview:_tlsLabel];
 
-    // ------------ STEP 3 行：STEP 3 | (spacer) | Pair ------------
+    // ------------ STEP 3 行：STEP 3 | (spacer) | Query | Pair ------------
     _stepThreeStackView = [[UIStackView alloc] init];
     _stepThreeStackView.axis = UILayoutConstraintAxisHorizontal;
     _stepThreeStackView.distribution = UIStackViewDistributionFill;
@@ -302,11 +315,21 @@
     [stepThreeSpacer setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
     [_stepThreeStackView addArrangedSubview:stepThreeSpacer];
 
+    // Query 在前、Pair 在后（Pair 后设备断开，无法再 Query），右对齐
+    _queryButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_queryButton setTitle:@"Query" forState:UIControlStateNormal];
+    _queryButton.layer.cornerRadius = 20.0;
+    _queryButton.backgroundColor = [UIColor systemGreenColor];
+    [_queryButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
+    [_stepThreeStackView addArrangedSubview:_queryButton];
+
+
     _pairButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [_pairButton setTitle:@"Pair" forState:UIControlStateNormal];
     _pairButton.layer.cornerRadius = 20.0;
     _pairButton.backgroundColor = [UIColor systemBlueColor];
     [_pairButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
+
     [_stepThreeStackView addArrangedSubview:_pairButton];
 
     // ------------ WiFi 配置区域 ------------
@@ -374,19 +397,16 @@
 
         [_queryButton.widthAnchor constraintEqualToConstant:65],
         [_queryButton.heightAnchor constraintEqualToConstant:40],
-        [_qrScanButton.widthAnchor constraintEqualToConstant:44],
         [_qrScanButton.heightAnchor constraintEqualToConstant:44],
+        [_qrScanButton.widthAnchor constraintEqualToConstant:44],
         [_searchButton.widthAnchor constraintEqualToConstant:44],
         [_searchButton.heightAnchor constraintEqualToConstant:44],
 
-        [_deviceHintLabel.topAnchor constraintEqualToAnchor:_headerStackView.bottomAnchor constant:4],
-        [_deviceHintLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [_deviceHintLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
     ]];
 
     // 设备信息视图
     [NSLayoutConstraint activateConstraints:@[
-        [_deviceInfoView.topAnchor constraintEqualToAnchor:_deviceHintLabel.bottomAnchor constant:6],
+        [_deviceInfoView.topAnchor constraintEqualToAnchor:_headerStackView.bottomAnchor constant:8],
         [_deviceInfoView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [_deviceInfoView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_deviceInfoView.heightAnchor constraintEqualToConstant:60],
@@ -394,9 +414,11 @@
         // 与 Android 一致：只显示设备 ID（左）+ 信号强度（右），不再单独显示设备名
         [_deviceIdLabel.leadingAnchor constraintEqualToAnchor:_deviceInfoView.leadingAnchor constant:16],
         [_deviceIdLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
+        [_deviceUidLabel.leadingAnchor constraintEqualToAnchor:_deviceIdLabel.trailingAnchor constant:8],
+        [_deviceUidLabel.trailingAnchor constraintEqualToAnchor:_deviceRssiLabel.leadingAnchor constant:-8],
+        [_deviceUidLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
         [_deviceRssiLabel.trailingAnchor constraintEqualToAnchor:_deviceInfoView.trailingAnchor constant:-16],
         [_deviceRssiLabel.centerYAnchor constraintEqualToAnchor:_deviceInfoView.centerYAnchor],
-        [_deviceRssiLabel.leadingAnchor constraintGreaterThanOrEqualToAnchor:_deviceIdLabel.trailingAnchor constant:8],
     ]];
 
     // STEP 2：标题、说明、地址/端口
@@ -693,6 +715,7 @@
         
     // 置空当前设备
     self.selectedDevice = nil;
+    self.selectedQrCode = nil;
     [self updateDeviceInfo:nil];
     }
 
@@ -713,20 +736,30 @@
 }
 
 //#pragma mark - 更新设备信息
+/// 未选设备时显示灰色提示，选中后显示设备 ID + 信号强度
+- (void)showDeviceId:(nullable NSString *)deviceId rssi:(nullable NSString *)rssi {
+    BOOL has = deviceId.length > 0;
+    // 中间列：QR 匹配选中时显示原始 QR 码，否则显示 MAC
+    NSString *uid = self.selectedQrCode.length > 0 ? self.selectedQrCode : self.selectedDevice.macAddress;
+    self.deviceUidLabel.text = has ? (uid ?: @"") : @"";
+    self.deviceIdLabel.text = has ? deviceId : @"Scan QR or BLE to select device";
+    self.deviceIdLabel.textColor = has ? [UIColor labelColor] : [UIColor systemGrayColor];
+    self.deviceIdLabel.font = [UIFont systemFontOfSize:16 weight:has ? UIFontWeightMedium : UIFontWeightRegular];
+    self.deviceRssiLabel.text = has ? rssi : @"";
+}
+
 - (void)updateDeviceInfo:(nullable DeviceInfo *)deviceInfo {
     if (!deviceInfo) {
         // 如果 deviceInfo 为空，显示默认值
         self.deviceNameLabel.text = @"";
-        self.deviceIdLabel.text = @"No Device";
-        self.deviceRssiLabel.text = @"--";
+        [self showDeviceId:nil rssi:nil];
         [self updateActionButtonsState];
         return;
     }
     // 与 Android 一致：显示完整设备 ID（无则退回设备名）+ 信号强度
     NSString *displayId = deviceInfo.deviceId.length > 0 ? deviceInfo.deviceId : (deviceInfo.deviceName ?: @"Unknown");
     self.deviceNameLabel.text = deviceInfo.deviceName ?: @"";
-    self.deviceIdLabel.text = displayId;
-    self.deviceRssiLabel.text = [NSString stringWithFormat:@"%lddBm", (long)deviceInfo.rssi];
+    [self showDeviceId:displayId rssi:[NSString stringWithFormat:@"%lddBm", (long)deviceInfo.rssi]];
     [self updateActionButtonsState];
 }
 //#pragma mark - 设置按钮处理
@@ -1177,8 +1210,7 @@
 - (void)updateDeviceDisplay:(DeviceInfo *)device {
     if (!device) {
         self.deviceNameLabel.text = @"";
-        self.deviceIdLabel.text = @"No Device";
-        self.deviceRssiLabel.text = @"--";
+        [self showDeviceId:nil rssi:nil];
         [self updateActionButtonsState];
         return;
     }
@@ -1186,8 +1218,7 @@
     // 与 Android 一致：显示完整设备 ID（无则退回设备名）
     NSString *displayId = device.deviceId.length > 0 ? device.deviceId : (device.deviceName ?: @"Unknown");
     self.deviceNameLabel.text = device.deviceName ?: @"";
-    self.deviceIdLabel.text = displayId;
-    self.deviceRssiLabel.text = [NSString stringWithFormat:@"%lddBm", (long)device.rssi];
+    [self showDeviceId:displayId rssi:[NSString stringWithFormat:@"%lddBm", (long)device.rssi]];
     [self updateActionButtonsState];
 }
 
@@ -1299,14 +1330,21 @@ static const NSTimeInterval kQrMatchTotalTimeout = 10.0;   // 总超时
     [self startQrMatch:code];
 }
 
-/// 扫码成功后开始匹配设备：BM 开头走 Sleepace，否则走 ESP 雷达
+/// 扫码成功后开始匹配设备：BM 开头走 Sleepace 直接匹配 QR 码（无兜底）；
+/// 否则按 ESP 雷达处理，先用 "TSBLU"+后 6 位匹配，3 秒未命中再用完整 QR 码兜底
 - (void)startQrMatch:(NSString *)code {
     if (code.length == 0) return;
     [self stopQrMatch];
     self.qrMatching = YES;
     self.qrOriginalCode = code;
-    self.qrMatchCode = code;
-    [self showMessage:[NSString stringWithFormat:@"QR code: %@, matching device...", code]];
+    if ([[code uppercaseString] hasPrefix:@"BM"]) {
+        self.qrMatchCode = code;
+    } else {
+        NSString *tail = code.length > 6 ? [code substringFromIndex:code.length - 6] : code;
+        self.qrMatchCode = [@"TSBLU" stringByAppendingString:[tail uppercaseString]];
+    }
+    self.qrSeenDevices = [NSMutableSet set];
+    [self showMessage:[NSString stringWithFormat:@"QR code: %@, matching device: %@", code, self.qrMatchCode]];
 
     // 匹配前断开残留的 GATT 连接，让设备恢复广播
     [[RadarBleManager sharedManager] disconnect];
@@ -1349,16 +1387,23 @@ static const NSTimeInterval kQrMatchTotalTimeout = 10.0;   // 总超时
     }
 }
 
-/// 3 秒未命中：取 code 最后 6 位拼 "TSBLU" 前缀，继续用 ESP 匹配
+/// 3 秒未命中：ESP 雷达改用完整 QR 码兜底匹配；Sleepace（BM）无兜底，继续原扫描
 - (void)startQrStage2 {
     if (!self.qrMatching) return;
     NSString *code = self.qrOriginalCode ?: @"";
-    NSString *tail = code.length > 6 ? [code substringFromIndex:code.length - 6] : code;
-    NSString *fallback = [@"TSBLU" stringByAppendingString:[tail uppercaseString]];
-    [self showMessage:[NSString stringWithFormat:@"Trying fallback device id: %@", fallback]];
-    self.qrMatchCode = fallback;
+    if ([[code uppercaseString] hasPrefix:@"BM"]) return;
+    [self showMessage:[NSString stringWithFormat:@"Trying fallback device id: %@", code]];
+    self.qrMatchCode = code;
     [self stopQrScans];
     [self startQrRadarScan];
+}
+
+/// 匹配过程中把扫到的设备实时打到状态栏，方便确认设备是否在广播
+- (void)reportQrScannedDevice:(DeviceInfo *)dev {
+    NSString *key = dev.macAddress ?: dev.deviceId ?: dev.deviceName;
+    if (key.length == 0 || [self.qrSeenDevices containsObject:key]) return;
+    [self.qrSeenDevices addObject:key];
+    [self showMessage:[NSString stringWithFormat:@"Scanned: %@ (%@)", dev.deviceName ?: @"", dev.macAddress ?: @""]];
 }
 
 - (void)startQrRadarScan {
@@ -1367,6 +1412,7 @@ static const NSTimeInterval kQrMatchTotalTimeout = 10.0;   // 总超时
     [radar setScanCallback:^(DeviceInfo * _Nonnull deviceInfo) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf || !strongSelf.qrMatching) return;
+        [strongSelf reportQrScannedDevice:deviceInfo];
         if ([strongSelf qrDeviceMatches:deviceInfo code:strongSelf.qrMatchCode]) {
             [strongSelf onQrMatchHit:deviceInfo];
         }
@@ -1387,11 +1433,23 @@ static BOOL QrCodeEquals(NSString * _Nullable a, NSString *b) {
     return QrCodeEquals(dev.deviceId, c)
         || QrCodeEquals(dev.deviceName, c)
         || QrCodeEquals(dev.macAddress, c)
-        || QrCodeEquals(macNoColon, cNoColon);
+        || QrCodeEquals(macNoColon, cNoColon)
+        || [self qrSuffixMatches:dev code:cNoColon macNoColon:macNoColon];
+}
+
+/// 设备广播名为 "TSBLU"+MAC 后 6 位；QR 码是完整 MAC/序列号时做后缀匹配
+- (BOOL)qrSuffixMatches:(DeviceInfo *)dev code:(NSString *)cNoColon macNoColon:(NSString *)macNoColon {
+    if (cNoColon.length < 6) return NO;
+    NSString *suffix6 = [cNoColon substringFromIndex:cNoColon.length - 6];
+    NSString *tsblu = [@"TSBLU" stringByAppendingString:suffix6];
+    if (QrCodeEquals(dev.deviceName, tsblu) || QrCodeEquals(dev.deviceId, tsblu)) return YES;
+    return macNoColon.length >= 6 && [macNoColon rangeOfString:suffix6 options:NSCaseInsensitiveSearch | NSBackwardsSearch | NSAnchoredSearch].location != NSNotFound;
 }
 
 - (void)onQrMatchHit:(DeviceInfo *)device {
+    NSString *qr = self.qrOriginalCode;
     [self stopQrMatch];
+    self.selectedQrCode = qr;
     [self showMessage:[NSString stringWithFormat:@"QR matched device: %@", device.deviceId]];
     [self onDeviceSelected:device];
 }
@@ -1436,6 +1494,7 @@ static BOOL QrCodeEquals(NSString * _Nullable a, NSString *b) {
 #pragma mark - ScanViewControllerDelegate
 
 - (void)scanViewController:(ScanViewController *)controller didSelectDevice:(DeviceInfo *)device {
+    self.selectedQrCode = nil;  // BLE 手动选择没有 QR 码
     [self onDeviceSelected:device];
 }
 
