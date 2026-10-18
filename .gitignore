@@ -1,0 +1,10 @@
+# Xcode 个人设置（断点、scheme 管理、workspace 设置）
+xcuserdata/
+*.xcuserstate
+
+# 编译产物
+build/
+DerivedData/
+
+# macOS
+.DS_Store
