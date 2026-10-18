@@ -141,7 +141,30 @@ typedef void(^SleepaceStatusCallback)(DeviceInfo * _Nonnull updatedDevice, BOOL 
         serverProtocol:(nullable NSString *)serverProtocol
             completion:(SleepaceConfigCallback)completion;
 
+/**
+ * 同上，增加 TLS 选项（是否 TLS 由 Default Device Server 规则按端口决定）
+ * useTls=NO 走 Sleepace SDK；useTls=YES 时 BM8701_2 需绕过 SDK 自行实现配网协议
+ * （见 docs/kimi3_sleepace_bm8701_2_tls.md），未实现前回调失败
+ */
+- (void)configureDevice:(DeviceInfo *)device
+              wifiSsid:(nullable NSString *)wifiSsid
+          wifiPassword:(nullable NSString *)wifiPassword
+         serverAddress:(nullable NSString *)serverAddress
+            serverPort:(NSInteger)serverPort
+        serverProtocol:(nullable NSString *)serverProtocol
+                useTls:(BOOL)useTls
+            completion:(SleepaceConfigCallback)completion;
+
 #pragma mark - 设备状态查询方法
+
+/**
+ * 读取设备当前的 WiFi 设置（SSID / 密码 / DHCP 或静态 IP）。
+ * BM8701_2 绕过 SDK 自行发送 0x03A1（与 Android SDK bleWiFiConfigGet 相同命令）；
+ * 设备协议里没有已确认的服务器地址读取命令，查不到服务器 / TLS。
+ * info 键见 SleepaceBm8701TlsConfigurator.h；失败时 error 为英文说明
+ */
+- (void)queryWiFiSettings:(DeviceInfo *)device
+               completion:(void(^)(BOOL success, NSDictionary *info, NSString * _Nullable error))completion;
 
 /**
  * 查询设备WiFi连接状态（直接使用CBPeripheral对象）

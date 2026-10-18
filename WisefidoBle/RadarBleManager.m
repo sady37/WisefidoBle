@@ -2102,10 +2102,26 @@ NSString * const RadarBlePreheatResultKeyUID = @"uid";
     }
     [self invalidateOperateStatusTimer];
     _isCollectingOperateStatus = NO;
-    NSString *finalResult = _respond10Buffer.length > 0 ? [_respond10Buffer copy] : @"";
+    NSString *finalResult = _respond10Buffer.length > 0 ? [self stripTaskList:_respond10Buffer] : @"";
     NSString *wrapped = [NSString stringWithFormat:@"10:%@", finalResult];
     [_respond10Buffer setString:@""];
     [self handleOperationStatusResponse:wrapped];
+}
+
+/// 去掉运行状态里的 FreeRTOS 任务列表行（如 "BTC_TASK       \t47250\t\t<1%"），只保留 UID / MCU / Radar / WiFi / Server 等信息
+- (NSString *)stripTaskList:(NSString *)raw {
+    static NSRegularExpression *taskLine;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        taskLine = [NSRegularExpression regularExpressionWithPattern:@"^\\S.*\\t\\d+\\t+<?\\d+%\\s*$" options:0 error:nil];
+    });
+    NSMutableArray<NSString *> *kept = [NSMutableArray array];
+    for (NSString *line in [raw componentsSeparatedByString:@"\n"]) {
+        if ([taskLine numberOfMatchesInString:line options:0 range:NSMakeRange(0, line.length)] == 0) {
+            [kept addObject:line];
+        }
+    }
+    return [[kept componentsJoinedByString:@"\n"] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
 - (void)restartOperateStatusTimer {

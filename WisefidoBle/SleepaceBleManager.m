@@ -3,6 +3,7 @@
 //
 
 #import "SleepaceBleManager.h"
+#import "SleepaceBm8701TlsConfigurator.h" // BM8701_2 TLS 配网（方案 B，绕过 SDK）
 // 需要确保这些SDK相关的头文件被正确引入
 #import <BluetoothManager/BluetoothManager.h>  // 包含了SLPBLEManager等
 #import <BLEWifiConfig/BLEWifiConfig.h>        // WiFi配置相关
@@ -52,6 +53,9 @@
 @property (nonatomic, strong) NSTimer *connectTimer;
 @property (nonatomic, strong) NSTimer *queryTimer;
 @property  SLPDeviceTypes deviceTypeEnum;
+
+// BM8701_2 TLS 配网器（仅 useTls=YES 且设备类型为 BM8701_2 时使用，需强引用保持存活）
+@property (nonatomic, strong) SleepaceBm8701TlsConfigurator *bm8701Configurator;
 
 
 // Private methods
@@ -391,6 +395,123 @@
          serverAddress:(nullable NSString *)serverAddress
             serverPort:(NSInteger)serverPort
         serverProtocol:(nullable NSString *)serverProtocol
+                useTls:(BOOL)useTls
+            completion:(SleepaceConfigCallback)completion {
+    if (!useTls) {
+        [self configureDevice:device wifiSsid:wifiSsid wifiPassword:wifiPassword
+                serverAddress:serverAddress serverPort:serverPort serverProtocol:serverProtocol completion:completion];
+        return;
+    }
+    // TLS 分支：仅 BM8701_2 支持（方案 B：绕过 SDK 自实现 SocketFrame-over-BLE，
+    // 见 docs/kimi3_sleepace_bm8701_2_tls.md）
+    SLPDeviceTypes tlsDeviceType = [self getSLPDeviceType:device.deviceType];
+    if (tlsDeviceType != SLPDeviceType_BM8701_2) {
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(NO, @{@"error": @"TLS configuration is only supported for BM8701_2 devices; other device types have no TLS server port"});
+            });
+        }
+        return;
+    }
+    if (!_currentPeripheral || ![_currentPeripheral.identifier.UUIDString isEqualToString:device.uuid]) {
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(NO, @{@"error": @"Device not connected or has been changed"});
+            });
+        }
+        return;
+    }
+    if (!wifiSsid.length || !serverAddress.length || serverPort <= 0 || serverPort > 65535) {
+        if (completion) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(NO, @{@"error": @"TLS configuration requires WiFi SSID and a valid server address/port"});
+            });
+        }
+        return;
+    }
+
+    // 与 SDK 路径一致：30s 外层配置超时 + isConfiguring 标记
+    _isConfiguring = YES;
+    self.configTimer = [NSTimer scheduledTimerWithTimeInterval:DEFAULT_CONFIG_TIMEOUT
+                                                       target:self
+                                                     selector:@selector(configurationTimedOut:)
+                                                     userInfo:@{@"completion": completion ? [completion copy] : [NSNull null]}
+                                                      repeats:NO];
+
+    // 确保 SDK 的 central 不再持有该设备的连接，且停掉 SDK 扫描
+    [_bleManager stopAllPeripheralScan];
+    __weak typeof(self) weakSelf = self;
+    [SLPBLESharedManager disconnectPeripheral:_currentPeripheral timeout:2.0
+                                   completion:^(SLPBLEDisconnectReturnCodes code, NSInteger hid) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        SLPLOG(@"TLS 配网前 SDK 断开完成 code=%ld，开始自建连接", (long)code);
+        strongSelf.bm8701Configurator = [[SleepaceBm8701TlsConfigurator alloc]
+            initWithPeripheralIdentifier:strongSelf->_currentPeripheral.identifier];
+        [strongSelf.bm8701Configurator configureWithServerAddress:serverAddress
+                                                             port:(uint16_t)serverPort
+                                                              tls:YES
+                                                             ssid:wifiSsid
+                                                         password:wifiPassword
+                                                         staticIp:nil
+                                                       subnetMask:nil
+                                                          gateway:nil
+                                                         progress:nil
+                                                       completion:^(BOOL ok, NSDictionary *info, NSError *err) {
+            __strong typeof(weakSelf) sself = weakSelf;
+            if (!sself) return;
+            // 外层 30s 超时已触发过时，忽略迟到的配置器回调，避免重复回调
+            if (!sself->_isConfiguring) return;
+            [sself invalidateConfigTimer];
+            sself->_isConfiguring = NO;
+
+            // 错误码映射到 SLPDataTransferStatus
+            SLPDataTransferStatus status = SLPDataTransferStatus_Succeed;
+            if (!ok) {
+                switch (err.code) {
+                    case SleepaceBm8701ErrorTimeout:       status = SLPDataTransferStatus_TimeOut; break;
+                    case SleepaceBm8701ErrorDisconnected:  status = SLPDataTransferStatus_ConnectionDisconnected; break;
+                    case SleepaceBm8701ErrorBluetoothOff:  status = SLPDataTransferStatus_ConnectionDisabled; break;
+                    case SleepaceBm8701ErrorParameter:     status = SLPDataTransferStatus_ParameterError; break;
+                    default:                               status = SLPDataTransferStatus_Failed; break;
+                }
+            } else {
+                // 成功：与 SDK 路径一样更新设备信息
+                device.wifiSsid = wifiSsid;
+                device.wifiPassword = wifiPassword;
+                device.serverAddress = serverAddress;
+                device.serverPort = serverPort;
+                device.serverProtocol = serverProtocol;
+                device.lastUpdateTime = [[NSDate date] timeIntervalSince1970];
+            }
+
+            NSMutableDictionary *result = [NSMutableDictionary dictionary];
+            [result setObject:@(status) forKey:@"status"];
+            [result setObject:@(ok) forKey:@"success"];
+            [result setObject:[sself stringForTransferStatus:status] forKey:@"statusMessage"];
+            if (ok) {
+                [result setObject:@"wifi_server" forKey:@"configType"];
+                [result setObject:@"WiFi & Server configuration successful (TLS)" forKey:@"message"];
+            } else {
+                [result setObject:[NSString stringWithFormat:@"TLS configuration failed: %@", err.localizedDescription ?: @"unknown"]
+                           forKey:@"error"];
+            }
+            if (info) {
+                [result setObject:info forKey:@"rawData"];
+            }
+            if (completion) {
+                completion(ok, result); // 配置器已保证回调在主线程
+            }
+        }];
+    }];
+}
+
+- (void)configureDevice:(DeviceInfo *)device
+              wifiSsid:(nullable NSString *)wifiSsid
+          wifiPassword:(nullable NSString *)wifiPassword
+         serverAddress:(nullable NSString *)serverAddress
+            serverPort:(NSInteger)serverPort
+        serverProtocol:(nullable NSString *)serverProtocol
             completion:(SleepaceConfigCallback)completion {
     
     // 参数验证
@@ -531,7 +652,10 @@
 
 - (void)configurationTimedOut:(NSTimer *)timer {
     //SLPLOG(@"Configuration timed out");
-    
+
+    // TLS 路径：取消正在进行的 BM8701_2 配置器
+    [self.bm8701Configurator cancel];
+
     NSDictionary *userInfo = timer.userInfo;
     id completion = userInfo[@"completion"];
     
@@ -558,6 +682,44 @@
 
 
 #pragma mark - Public Methods - Query Device Status
+- (void)queryWiFiSettings:(DeviceInfo *)device
+               completion:(void(^)(BOOL success, NSDictionary *info, NSString * _Nullable error))completion {
+    void (^fail)(NSString *) = ^(NSString *msg) {
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO, @{}, msg); });
+    };
+    if (_isConfiguring) {
+        fail(@"Configuration in progress");
+        return;
+    }
+    if ([self getSLPDeviceType:device.deviceType] != SLPDeviceType_BM8701_2) {
+        fail(@"WiFi query is only supported for BM8701_2 devices");
+        return;
+    }
+    NSUUID *identifier = _currentPeripheral.identifier ?: (device.uuid.length ? [[NSUUID alloc] initWithUUIDString:device.uuid] : nil);
+    if (!identifier) {
+        fail(@"Device not found, please rescan");
+        return;
+    }
+
+    // 与 TLS 配网相同：先让 SDK 断开并停扫，再由配置器自建连接读取
+    [_bleManager stopAllPeripheralScan];
+    __weak typeof(self) weakSelf = self;
+    void (^startQuery)(void) = ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        strongSelf.bm8701Configurator = [[SleepaceBm8701TlsConfigurator alloc] initWithPeripheralIdentifier:identifier];
+        [strongSelf.bm8701Configurator queryWiFiWithCompletion:^(BOOL ok, NSDictionary *info, NSError *err) {
+            if (completion) completion(ok, info, ok ? nil : (err.localizedDescription ?: @"unknown error"));
+        }];
+    };
+    if (_currentPeripheral) {
+        [SLPBLESharedManager disconnectPeripheral:_currentPeripheral timeout:2.0
+                                       completion:^(SLPBLEDisconnectReturnCodes code, NSInteger hid) { startQuery(); }];
+    } else {
+        startQuery();
+    }
+}
+
 - (void)queryDeviceStatus:(DeviceInfo *)deviceInfo completion:(SleepaceStatusCallback)completion {
     // 检查设备连接状态
     if (!_currentPeripheral) {

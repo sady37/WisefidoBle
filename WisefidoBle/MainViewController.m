@@ -8,6 +8,7 @@
 #import "ConfigStorage.h"
 #import "ScanViewController.h"
 #import "RecentRecordsViewController.h"
+#import "DeviceServerRules.h"
 #import "QrScanViewController.h"
 #import <os/log.h>
 
@@ -37,9 +38,7 @@
 @property (nonatomic, strong) UIButton *searchButton;
 @property (nonatomic, weak, nullable) QrScanViewController *activeQrVC; // 顶部扫码面板
 @property (nonatomic, strong) UIButton *qrScanButton;      // STEP 1 行：扫码匹配
-@property (nonatomic, strong) UIView *serverHistoryRow;    // Recent Servers + TLS 开关
-@property (nonatomic, strong) UILabel *tlsLabel;
-@property (nonatomic, strong) UISwitch *tlsSwitch;
+@property (nonatomic, strong) UIView *serverHistoryRow;    // Recent Servers + Recent WiFi（WiFi 输入框下方）
 @property (nonatomic, strong) UIStackView *stepThreeStackView; // STEP 3 | Pair
 @property (nonatomic, strong) UILabel *stepThreeLabel;
 
@@ -50,7 +49,6 @@
 @property (nonatomic, strong) NSMutableSet<NSString *> *qrSeenDevices; // 本次匹配中已打印到状态栏的设备
 @property (nonatomic, strong, nullable) NSTimer *qrStage1Timer;
 @property (nonatomic, strong, nullable) NSTimer *qrTimeoutTimer;
-@property (nonatomic, strong, nullable) UIAlertController *qrProgressAlert;
 
 
 
@@ -60,8 +58,6 @@
 @property (nonatomic, strong) UIButton *recentWifiButton;
 @property (nonatomic, strong) UILabel *configTitle;
 @property (nonatomic, strong) UILabel *serverInfoLabel;
-@property (nonatomic, strong) UILabel *wifiInfoLabel;
-@property (nonatomic, strong) UIView *historyContainer;
 @property (nonatomic, strong) UIView *buttonContainer;
 
 @property (nonatomic, strong) UIButton *passwordRevealButton;
@@ -125,6 +121,9 @@
     self.serverAddressTextField.text = @"app.wisefido.com";
     self.serverPortTextField.text = @"29010";
     [self updateActionButtonsState];
+
+    // 拉取在线设备服务器模板（失败则用缓存/内置默认）
+    [DeviceServerRules refreshFromRemoteWithCompletion:nil];
 
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(handleRadarPreheatNotification:)
@@ -264,7 +263,7 @@
     [self.view addSubview:_serverAddressTextField];
 
     _serverPortTextField = [[UITextField alloc] init];
-    _serverPortTextField.placeholder = @"29015(TLS) or 29010";
+    _serverPortTextField.placeholder = @"8443(TLS) or 29010";
     _serverPortTextField.borderStyle = UITextBorderStyleRoundedRect;
     _serverPortTextField.autocorrectionType = UITextAutocorrectionTypeNo;
     _serverPortTextField.autocapitalizationType = UITextAutocapitalizationTypeNone;
@@ -272,7 +271,7 @@
     _serverPortTextField.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_serverPortTextField];
 
-    // Recent Servers + TLS 开关一行
+    // Recent Servers + Recent WiFi 一行（布局在 WiFi 输入框下方）
     _serverHistoryRow = [[UIView alloc] init];
     _serverHistoryRow.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_serverHistoryRow];
@@ -284,16 +283,13 @@
     _recentServerButton.translatesAutoresizingMaskIntoConstraints = NO;
     [_serverHistoryRow addSubview:_recentServerButton];
 
-    _tlsSwitch = [[UISwitch alloc] init];
-    _tlsSwitch.on = NO;
-    _tlsSwitch.translatesAutoresizingMaskIntoConstraints = NO;
-    [_serverHistoryRow addSubview:_tlsSwitch];
-
-    _tlsLabel = [[UILabel alloc] init];
-    _tlsLabel.text = @"TLS Encryption";
-    _tlsLabel.font = [UIFont systemFontOfSize:14];
-    _tlsLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [_serverHistoryRow addSubview:_tlsLabel];
+    // Recent WiFi 与 Recent Servers 同一行，右对齐
+    _recentWifiButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_recentWifiButton setTitle:@"Recent Wifi (0)" forState:UIControlStateNormal];
+    _recentWifiButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
+    [_recentWifiButton setImage:[UIImage systemImageNamed:@"clock"] forState:UIControlStateNormal];
+    _recentWifiButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [_serverHistoryRow addSubview:_recentWifiButton];
 
     // ------------ STEP 3 行：STEP 3 | (spacer) | Query | Pair ------------
     _stepThreeStackView = [[UIStackView alloc] init];
@@ -314,31 +310,6 @@
     [stepThreeSpacer setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
     [stepThreeSpacer setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
     [_stepThreeStackView addArrangedSubview:stepThreeSpacer];
-
-    // Query 在前、Pair 在后（Pair 后设备断开，无法再 Query），右对齐
-    _queryButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_queryButton setTitle:@"Query" forState:UIControlStateNormal];
-    _queryButton.layer.cornerRadius = 20.0;
-    _queryButton.backgroundColor = [UIColor systemGreenColor];
-    [_queryButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
-    [_stepThreeStackView addArrangedSubview:_queryButton];
-
-
-    _pairButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_pairButton setTitle:@"Pair" forState:UIControlStateNormal];
-    _pairButton.layer.cornerRadius = 20.0;
-    _pairButton.backgroundColor = [UIColor systemBlueColor];
-    [_pairButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
-
-    [_stepThreeStackView addArrangedSubview:_pairButton];
-
-    // ------------ WiFi 配置区域 ------------
-    _wifiInfoLabel = [[UILabel alloc] init];
-    _wifiInfoLabel.text = @"Select WLAN to connect device";
-    _wifiInfoLabel.font = [UIFont systemFontOfSize:14];
-    _wifiInfoLabel.textColor = [UIColor systemGrayColor];
-    _wifiInfoLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_wifiInfoLabel];
 
     _wifiNameTextField = [[UITextField alloc] init];
     _wifiNameTextField.placeholder = @"WiFi Name";
@@ -364,17 +335,23 @@
     _wifiPasswordTextField.rightViewMode = UITextFieldViewModeAlways;
     [self updatePasswordRevealButtonAppearance:NO];
 
-    // Recent WiFi 一行
-    _historyContainer = [[UIView alloc] init];
-    _historyContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:_historyContainer];
+    // Query 在前、Pair 在后（Pair 后设备断开，无法再 Query），右对齐
+    _queryButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_queryButton setTitle:@"Query" forState:UIControlStateNormal];
+    _queryButton.layer.cornerRadius = 20.0;
+    _queryButton.backgroundColor = [UIColor systemGreenColor];
+    [_queryButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
+    [_stepThreeStackView addArrangedSubview:_queryButton];
 
-    _recentWifiButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_recentWifiButton setTitle:@"Recent Wifi (0)" forState:UIControlStateNormal];
-    _recentWifiButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-    [_recentWifiButton setImage:[UIImage systemImageNamed:@"clock"] forState:UIControlStateNormal];
-    _recentWifiButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [_historyContainer addSubview:_recentWifiButton];
+
+    _pairButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_pairButton setTitle:@"Pair" forState:UIControlStateNormal];
+    _pairButton.layer.cornerRadius = 20.0;
+    _pairButton.backgroundColor = [UIColor systemBlueColor];
+    [_pairButton setTitleColor:[UIColor systemBackgroundColor] forState:UIControlStateNormal];
+
+    [_stepThreeStackView addArrangedSubview:_pairButton];
+
 
     // ------------ 状态输出区域 ------------
     _statusOutputTextView = [[UITextView alloc] init];
@@ -425,26 +402,27 @@
     [NSLayoutConstraint activateConstraints:@[
         [_configTitle.topAnchor constraintEqualToAnchor:_deviceInfoView.bottomAnchor constant:16],
         [_configTitle.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [_configTitle.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
 
-        [_serverInfoLabel.topAnchor constraintEqualToAnchor:_configTitle.bottomAnchor constant:4],
-        [_serverInfoLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [_serverInfoLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        // 说明文字放在 STEP 2 标题后面，节省高度
+        [_serverInfoLabel.firstBaselineAnchor constraintEqualToAnchor:_configTitle.firstBaselineAnchor],
+        [_serverInfoLabel.leadingAnchor constraintEqualToAnchor:_configTitle.trailingAnchor constant:8],
+        [_serverInfoLabel.trailingAnchor constraintLessThanOrEqualToAnchor:self.view.trailingAnchor constant:-16],
 
-        [_serverAddressTextField.topAnchor constraintEqualToAnchor:_serverInfoLabel.bottomAnchor constant:8],
+        [_serverAddressTextField.topAnchor constraintEqualToAnchor:_configTitle.bottomAnchor constant:8],
         [_serverAddressTextField.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [_serverAddressTextField.trailingAnchor constraintEqualToAnchor:_serverPortTextField.leadingAnchor constant:-8],
         [_serverAddressTextField.heightAnchor constraintEqualToConstant:44],
 
-        [_serverPortTextField.topAnchor constraintEqualToAnchor:_serverInfoLabel.bottomAnchor constant:8],
+        [_serverPortTextField.topAnchor constraintEqualToAnchor:_configTitle.bottomAnchor constant:8],
         [_serverPortTextField.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_serverPortTextField.heightAnchor constraintEqualToConstant:44],
         [_serverAddressTextField.widthAnchor constraintEqualToAnchor:_serverPortTextField.widthAnchor multiplier:1.5],
     ]];
 
-    // Recent Servers + TLS 开关
+    // Recent Servers + Recent WiFi（WiFi 输入框下方）
     [NSLayoutConstraint activateConstraints:@[
-        [_serverHistoryRow.topAnchor constraintEqualToAnchor:_serverPortTextField.bottomAnchor constant:4],
+        // 放在 WiFi 输入框下方，远离 Pair 防误触
+        [_serverHistoryRow.topAnchor constraintEqualToAnchor:_wifiPasswordTextField.bottomAnchor constant:4],
         [_serverHistoryRow.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [_serverHistoryRow.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_serverHistoryRow.heightAnchor constraintEqualToConstant:44],
@@ -452,36 +430,29 @@
         [_recentServerButton.leadingAnchor constraintEqualToAnchor:_serverHistoryRow.leadingAnchor],
         [_recentServerButton.centerYAnchor constraintEqualToAnchor:_serverHistoryRow.centerYAnchor],
         [_recentServerButton.heightAnchor constraintEqualToConstant:44],
-        [_recentServerButton.trailingAnchor constraintLessThanOrEqualToAnchor:_tlsLabel.leadingAnchor constant:-8],
+        [_recentServerButton.trailingAnchor constraintLessThanOrEqualToAnchor:_recentWifiButton.leadingAnchor constant:-8],
 
-        [_tlsSwitch.trailingAnchor constraintEqualToAnchor:_serverHistoryRow.trailingAnchor],
-        [_tlsSwitch.centerYAnchor constraintEqualToAnchor:_serverHistoryRow.centerYAnchor],
-        [_tlsLabel.trailingAnchor constraintEqualToAnchor:_tlsSwitch.leadingAnchor constant:-8],
-        [_tlsLabel.centerYAnchor constraintEqualToAnchor:_serverHistoryRow.centerYAnchor],
+        [_recentWifiButton.trailingAnchor constraintEqualToAnchor:_serverHistoryRow.trailingAnchor],
+        [_recentWifiButton.centerYAnchor constraintEqualToAnchor:_serverHistoryRow.centerYAnchor],
+        [_recentWifiButton.heightAnchor constraintEqualToConstant:44],
     ]];
 
     // STEP 3 行
     [NSLayoutConstraint activateConstraints:@[
-        [_stepThreeStackView.topAnchor constraintEqualToAnchor:_serverHistoryRow.bottomAnchor constant:8],
+        [_stepThreeStackView.topAnchor constraintEqualToAnchor:_serverPortTextField.bottomAnchor constant:12],
         [_stepThreeStackView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [_stepThreeStackView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_stepThreeStackView.heightAnchor constraintEqualToConstant:44],
-        [_pairButton.widthAnchor constraintEqualToConstant:65],
-        [_pairButton.heightAnchor constraintEqualToConstant:40],
     ]];
 
-    // WiFi 说明 + 名称/密码
+    // WiFi 名称/密码
     [NSLayoutConstraint activateConstraints:@[
-        [_wifiInfoLabel.topAnchor constraintEqualToAnchor:_stepThreeStackView.bottomAnchor constant:4],
-        [_wifiInfoLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [_wifiInfoLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-
-        [_wifiNameTextField.topAnchor constraintEqualToAnchor:_wifiInfoLabel.bottomAnchor constant:8],
+        [_wifiNameTextField.topAnchor constraintEqualToAnchor:_stepThreeStackView.bottomAnchor constant:8],
         [_wifiNameTextField.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [_wifiNameTextField.trailingAnchor constraintEqualToAnchor:_wifiPasswordTextField.leadingAnchor constant:-8],
         [_wifiNameTextField.heightAnchor constraintEqualToConstant:44],
 
-        [_wifiPasswordTextField.topAnchor constraintEqualToAnchor:_wifiInfoLabel.bottomAnchor constant:8],
+        [_wifiPasswordTextField.topAnchor constraintEqualToAnchor:_stepThreeStackView.bottomAnchor constant:8],
         [_wifiPasswordTextField.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_wifiPasswordTextField.heightAnchor constraintEqualToConstant:44],
         [_wifiNameTextField.widthAnchor constraintEqualToAnchor:_wifiPasswordTextField.widthAnchor],
@@ -489,22 +460,15 @@
         [_wifiPasswordTextField.widthAnchor constraintGreaterThanOrEqualToConstant:100],
     ]];
 
-    // Recent WiFi
+    // Pair 宽高（与 Query 一致）
     [NSLayoutConstraint activateConstraints:@[
-        [_historyContainer.topAnchor constraintEqualToAnchor:_wifiPasswordTextField.bottomAnchor constant:4],
-        [_historyContainer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [_historyContainer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [_historyContainer.heightAnchor constraintEqualToConstant:44],
-
-        [_recentWifiButton.leadingAnchor constraintEqualToAnchor:_historyContainer.leadingAnchor],
-        [_recentWifiButton.centerYAnchor constraintEqualToAnchor:_historyContainer.centerYAnchor],
-        [_recentWifiButton.widthAnchor constraintEqualToAnchor:_historyContainer.widthAnchor multiplier:0.5],
-        [_recentWifiButton.heightAnchor constraintEqualToConstant:44],
+        [_pairButton.widthAnchor constraintEqualToConstant:65],
+        [_pairButton.heightAnchor constraintEqualToConstant:40],
     ]];
 
     // 状态输出：占满剩余高度，最少 120
     [NSLayoutConstraint activateConstraints:@[
-        [_statusOutputTextView.topAnchor constraintEqualToAnchor:_historyContainer.bottomAnchor constant:12],
+        [_statusOutputTextView.topAnchor constraintEqualToAnchor:_serverHistoryRow.bottomAnchor constant:8],
         [_statusOutputTextView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [_statusOutputTextView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [_statusOutputTextView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-16],
@@ -517,7 +481,6 @@
     [self.queryButton addTarget:self action:@selector(handleQueryButton:) forControlEvents:UIControlEventTouchUpInside];
     [self.searchButton addTarget:self action:@selector(handleSearchButton:) forControlEvents:UIControlEventTouchUpInside];
     [self.qrScanButton addTarget:self action:@selector(handleQrScanButton:) forControlEvents:UIControlEventTouchUpInside];
-    [self.tlsSwitch addTarget:self action:@selector(handleTlsSwitchChanged:) forControlEvents:UIControlEventValueChanged];
     [self.recentServerButton addTarget:self action:@selector(showServerHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
     [self.recentWifiButton addTarget:self action:@selector(showWifiHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
 }
@@ -609,6 +572,7 @@
     } else {
         self.recentServerButton.hidden = NO;
     }
+    [self setHistoryButton:self.recentServerButton hasRecords:recentServers.count > 0];
     
     // 加载最近的WiFi配置
     NSArray<NSDictionary<NSString *, NSString *> *> *recentWifis = [self.configStorage getWiFiConfigs];
@@ -618,10 +582,31 @@
     } else {
         self.recentWifiButton.hidden = NO;
     }
+    [self setHistoryButton:self.recentWifiButton hasRecords:recentWifis.count > 0];
+}
+
+/// 有记录时用主题蓝（文字 + 时钟图标），无记录时灰色
+- (void)setHistoryButton:(UIButton *)button hasRecords:(BOOL)hasRecords {
+    UIColor *color = hasRecords ? [UIColor systemBlueColor] : [UIColor secondaryLabelColor];
+    button.tintColor = color;
+    [button setTitleColor:color forState:UIControlStateNormal];
+}
+
+/// 每个动作（QR / BLE 扫描、Query、Pair）开始时清空状态栏，只保留本次动作的输出
+- (void)clearStatus {
+    self.statusOutputTextView.text = @"";
+}
+
+/// 断开雷达与 Sleepace 当前的 GATT 连接
+- (void)disconnectAllGatt {
+    [[RadarBleManager sharedManager] disconnect];
+    [[SleepaceBleManager getInstance:self] disconnect];
 }
 
 #pragma mark - 按钮处理
 - (void)handlePairButton:(id)sender {
+    [self.view endEditing:YES]; // 收起键盘；SSID 结束编辑时会去掉首尾空格
+    [self clearStatus];
     // 检查设备选择
     if (!self.selectedDevice) {
         [self showMessage:@"Please select a device first"];
@@ -638,6 +623,8 @@
     }
     NSString *serverProtocol = protocolAndPort[0];
     NSInteger serverPort = [protocolAndPort[1] integerValue];
+    // 先显示实际使用的服务器和 TLS 判断（TLS 由 Default Device Server 规则决定，首页无开关）
+    [self showMessage:[NSString stringWithFormat:@"Server: %@:%ld  TLS=%@", serverAddress, (long)serverPort, [self currentPortIsTls] ? @"Y" : @"N"]];
     NSString *wifiSsid = self.wifiNameTextField.text;
     NSString *wifiPassword = self.wifiPasswordTextField.text;
     
@@ -647,16 +634,12 @@
         return;
     }
     
-    if (self.selectedDevice.productorName == ProductorSleepBoardHS && self.tlsSwitch.isOn) {
-        // iOS Sleepace SDK(BLEWifiConfig) 的 configure 没有 portEncrypt 参数，只能靠端口 29015 表达 TLS
-        [self showMessage:@"Note: iOS Sleepace SDK has no portEncrypt option, TLS is implied by port 29015 only"];
-    }
-
     // 保存配置历史
     if (wifiSsid.length) {
         [self.configStorage saveWiFiConfigWithSsid:wifiSsid password:wifiPassword];
     }
     [self.configStorage saveServerConfig:serverAddress port:serverPort protocol:serverProtocol];
+    [self loadRecentConfigs]; // 刷新 Recent 数量和颜色
     
     // 执行设备配置
     [self configureDevice:self.selectedDevice
@@ -670,6 +653,8 @@
 
 - (void)handleQueryButton:(id)sender  {
     MAINLOG(@"Query button tapped!!");
+    [self.view endEditing:YES];
+    [self clearStatus];
     // 检查设备选择
     if (!self.selectedDevice) {
         [self showMessage:@"Please select a device first"];
@@ -695,6 +680,7 @@
 //#pragma mark - 扫描设备	
 - (void)handleSearchButton:(id)sender {
     MAINLOG(@"Search button tapped!");
+    [self clearStatus];
     // 清理资源：断开当前设备连接
     if (self.selectedDevice != nil) {
         // 根据设备类型断开连接
@@ -721,7 +707,7 @@
 
     // 进入扫描前取消扫码匹配、断开残留的 GATT 连接：设备被连接时停止广播，会扫不到
     [self stopQrMatch];
-    [[RadarBleManager sharedManager] disconnect];
+    [self disconnectAllGatt];
 
     // 创建ScanViewController
     ScanViewController *scanVC = [[ScanViewController alloc] init]; // 使用新的初始化方法
@@ -960,6 +946,7 @@
                                                     serverAddress:serverAddress
                                                        serverPort:serverPort
                                                    serverProtocol:serverProtocol
+                                                           useTls:[self currentPortIsTls]
                                                        completion:^(BOOL success, NSDictionary *result) {
                 // 处理配置结果
                 if (success) {
@@ -1078,18 +1065,27 @@
     }];
 }
 
+/// Sleepace 查询：只能读 WiFi 设置（SSID / 密码 / DHCP 或静态 IP），读不到服务器地址和 TLS
 - (void)querySleepaceStatus:(DeviceInfo *)device {
     [self showMessage:@"Querying Sleepace device status..."];
-    
-    [[SleepaceBleManager getInstance:self] queryDeviceStatus:device completion:^(DeviceInfo *updatedDevice, BOOL success) {
-        if (!success) {
-            [self showMessage:@"Failed, please rescan;deviceType BM8701_2 is not support query"];
-            return;
+    [[SleepaceBleManager getInstance:self] queryWiFiSettings:device completion:^(BOOL success, NSDictionary *info, NSString *error) {
+        NSMutableString *text = [NSMutableString string];
+        [text appendFormat:@"deviceName:%@\n", device.deviceName ?: @""];
+        if (info[@"version"]) [text appendFormat:@"version:%@\n", info[@"version"]];
+        [text appendFormat:@"BLErssi:%lddBm\n", (long)device.rssi];
+        if (success) {
+            [text appendFormat:@"wifiSsid:%@\n", info[@"ssid"] ?: @""];
+            [text appendFormat:@"wifiPwd:%@\n", info[@"password"] ?: @""];
+            if ([info[@"ipType"] isEqualToString:@"0"] || !info[@"ipType"]) {
+                [text appendString:@"ipType:DHCP\n"];
+            } else {
+                [text appendFormat:@"ipType:Static ip:%@ mask:%@ gw:%@\n", info[@"staticIp"], info[@"subnetMask"], info[@"gateway"]];
+            }
+            [text appendString:@"(server/TLS not readable via Sleepace protocol)"];
+        } else {
+            [text appendFormat:@"Query failed: %@", error ?: @"unknown error"];
         }
-        
-        // 更新设备信息
-        self.selectedDevice = updatedDevice;
-        [self updateStatusDisplay:updatedDevice];
+        [self showMessage:text];
     }];
 }
 
@@ -1263,7 +1259,26 @@
     }
     [self updateDeviceDisplay:device];
     [self showMessage:[NSString stringWithFormat:@"Device selected: %@", device.deviceName]];
+    [self applyDefaultServerForDevice:device];
 }
+
+/// 按设备前缀（Config 页 Default Device Server）自动填写服务器地址和端口
+- (void)applyDefaultServerForDevice:(DeviceInfo *)device {
+    NSDictionary<NSString *, id> *rule = [DeviceServerRules ruleForDevice:device qrCode:self.selectedQrCode];
+    if (!rule) return;
+    self.serverAddressTextField.text = rule[kDeviceServerRuleServerKey];
+    self.serverPortTextField.text = rule[kDeviceServerRulePortKey];
+    [self showMessage:[NSString stringWithFormat:@"Server set by prefix %@: %@", rule[kDeviceServerRulePrefixKey],
+                       [DeviceServerRules displayServerForRule:rule]]];
+}
+
+/// 当前地址+端口是否走 TLS（由 Default Device Server 规则决定）；端口无效时按明文处理
+- (BOOL)currentPortIsTls {
+    NSArray *protocolAndPort = [self parseProtocolAndPort:self.serverPortTextField.text ?: @""];
+    if (protocolAndPort.count != 2) return NO;
+    return [DeviceServerRules isTlsPort:[protocolAndPort[1] integerValue] server:self.serverAddressTextField.text];
+}
+
 
 /// 根据是否有选中设备，统一更新 Query / Pair 按钮可用状态
 - (void)updateActionButtonsState {
@@ -1274,31 +1289,23 @@
     self.pairButton.alpha = hasDevice ? 1.0 : 0.5;
 }
 
-/// TLS/明文切换：仅当端口为空或仍是另一模式的默认端口时自动填充
-- (void)handleTlsSwitchChanged:(UISwitch *)sender {
-    NSString *current = [(self.serverPortTextField.text ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    current = [[current lowercaseString] stringByReplacingOccurrencesOfString:@"tcp" withString:@""];
-    if (sender.isOn) {
-        if (current.length == 0 || [current isEqualToString:@"29010"]) {
-            self.serverPortTextField.text = @"29015";
-        }
-    } else {
-        if (current.length == 0 || [current isEqualToString:@"29015"]) {
-            self.serverPortTextField.text = @"29010";
-        }
-    }
-}
-
 #pragma mark - 首页扫码匹配（对应 Android startQrMatch）
 
 static const NSTimeInterval kQrMatchStage1Timeout = 3.0;   // 3 秒未命中 → TSBLU+后 6 位回退
 static const NSTimeInterval kQrMatchTotalTimeout = 10.0;   // 总超时
 
 - (void)handleQrScanButton:(id)sender {
-    [self stopQrMatch];
+    // 匹配进行中再点一次 = 取消匹配（不再弹进度框）
+    if (self.qrMatching) {
+        [self cancelQrMatch];
+        return;
+    }
     if (self.activeQrVC.parentViewController) { // 面板仍挂在界面上就不重复弹
         return;
     }
+    // 新动作开始：清空状态栏，断开当前 GATT 连接
+    [self clearStatus];
+    [self disconnectAllGatt];
     // 顶部浮层（不用底部 sheet：单手操作时底部不顺手），与 Android 顶部扫码小窗一致
     QrScanViewController *qrVC = [[QrScanViewController alloc] init];
     qrVC.delegate = self;
@@ -1347,7 +1354,7 @@ static const NSTimeInterval kQrMatchTotalTimeout = 10.0;   // 总超时
     [self showMessage:[NSString stringWithFormat:@"QR code: %@, matching device: %@", code, self.qrMatchCode]];
 
     // 匹配前断开残留的 GATT 连接，让设备恢复广播
-    [[RadarBleManager sharedManager] disconnect];
+    [self disconnectAllGatt];
     [self startQrStage1];
 
     __weak typeof(self) weakSelf = self;
@@ -1358,14 +1365,8 @@ static const NSTimeInterval kQrMatchTotalTimeout = 10.0;   // 总超时
         [weakSelf onQrMatchTimeout];
     }];
 
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Scan device QR code"
-                                                                   message:[NSString stringWithFormat:@"Matching device: %@", code]
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction * _Nonnull action) {
-        [weakSelf cancelQrMatch];
-    }]];
-    self.qrProgressAlert = alert;
-    [self presentViewController:alert animated:YES completion:nil];
+    // 不再弹进度框：匹配过程只在状态栏显示，再点一次扫码图标可取消
+    [self showMessage:@"Matching... tap the QR icon again to cancel"];
 }
 
 - (void)startQrStage1 {
@@ -1476,17 +1477,9 @@ static BOOL QrCodeEquals(NSString * _Nullable a, NSString *b) {
     if (wasMatching) {
         [self stopQrScans];
     }
-    if (self.qrProgressAlert) {
-        UIAlertController *alert = self.qrProgressAlert;
-        self.qrProgressAlert = nil;
-        if (alert.presentingViewController) {
-            [alert dismissViewControllerAnimated:YES completion:nil];
-        }
-    }
 }
 
 - (void)cancelQrMatch {
-    self.qrProgressAlert = nil; // 用户点了 Cancel，alert 已自行关闭
     [self stopQrMatch];
     [self showMessage:@"QR match canceled"];
 }
@@ -1539,7 +1532,8 @@ static BOOL QrCodeEquals(NSString * _Nullable a, NSString *b) {
 
 #pragma mark - UITextFieldDelegate
 - (void)textFieldDidEndEditing:(UITextField *)textField {
-    // 输入结束时自动去除头尾空格
+    // 输入结束时自动去除头尾空格（密码允许首尾空格，不处理）
+    if (textField == self.wifiPasswordTextField) return;
     textField.text = [textField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
 }
 

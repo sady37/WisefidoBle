@@ -1,0 +1,8 @@
+{
+  "version": 4,
+  "updated": "2026-10-17",
+  "rules": [
+    { "name": "Radar",   "prefix": "TSBLU", "server": "app.wisefido.com", "port": 8443,  "tls": "Y" },
+    { "name": "Sleepad", "prefix": "BM87",  "server": "app.wisefido.com", "port": 29010, "tls": "N" }
+  ]
+}
