@@ -11,13 +11,18 @@ NSString * const kDeviceServerRulePrefixKey = @"prefix";
 NSString * const kDeviceServerRuleServerKey = @"server";
 NSString * const kDeviceServerRulePortKey = @"port";
 NSString * const kDeviceServerRuleTlsKey = @"tls";
+NSString * const kDeviceServerRuleProtocolKey = @"protocol";
+
+NSString * const kDeviceServerProtocolTcp = @"tcp";
+NSString * const kDeviceServerProtocolUdp = @"udp";
 
 static NSString * const kCustomRuleName = @"Custom";
 
 // UserDefaults 键（v4：任意条数规则）
 static NSString * const kRemoteTemplateCacheKey = @"deviceServerRemoteTemplateV4";  // 原始 JSON 数据
-static NSString * const kUserPrefixesKey = @"deviceServerUserPrefixesV4";          // {name: prefix}
+static NSString * const kUserPrefixesKey = @"deviceServerUserPrefixesV4";          // 旧版 {name: prefix}，仅用于迁移
 static NSString * const kUserCustomRuleKey = @"deviceServerUserCustomV4";          // 本地自定义规则
+static NSString * const kUserRulesKey = @"deviceServerUserRulesV5";                // {name: {prefix, server, port, tls}} 仅存与默认不同的字段
 
 // 在线模板地址：官网 www 优先，pilot 备用（同一台服务器，仅防域名/站点调整）
 static NSString * const kRemoteRuleURLs[] = {
@@ -32,8 +37,8 @@ static const NSUInteger kRemoteRuleURLCount = sizeof(kRemoteRuleURLs) / sizeof(k
 
 + (NSArray<NSDictionary *> *)builtInRules {
     return @[
-        @{kDeviceServerRuleNameKey: @"Radar",   kDeviceServerRulePrefixKey: @"TSBLU", kDeviceServerRuleServerKey: @"app.wisefido.com", kDeviceServerRulePortKey: @"8443",  kDeviceServerRuleTlsKey: @YES},
-        @{kDeviceServerRuleNameKey: @"Sleepad", kDeviceServerRulePrefixKey: @"BM87",  kDeviceServerRuleServerKey: @"app.wisefido.com", kDeviceServerRulePortKey: @"29010", kDeviceServerRuleTlsKey: @NO},
+        @{kDeviceServerRuleNameKey: @"Radar",   kDeviceServerRulePrefixKey: @"TSBLU", kDeviceServerRuleServerKey: @"app.wisefido.com", kDeviceServerRulePortKey: @"8443",  kDeviceServerRuleTlsKey: @YES, kDeviceServerRuleProtocolKey: kDeviceServerProtocolTcp},
+        @{kDeviceServerRuleNameKey: @"Sleepad", kDeviceServerRulePrefixKey: @"BM87",  kDeviceServerRuleServerKey: @"app.wisefido.com", kDeviceServerRulePortKey: @"29010", kDeviceServerRuleTlsKey: @NO,  kDeviceServerRuleProtocolKey: kDeviceServerProtocolTcp},
     ];
 }
 
@@ -43,17 +48,28 @@ static const NSUInteger kRemoteRuleURLCount = sizeof(kRemoteRuleURLs) / sizeof(k
 }
 
 + (NSArray<NSDictionary *> *)currentRules {
-    NSDictionary *userPrefixes = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kUserPrefixesKey];
+    NSDictionary *overrides = [self userRuleOverrides];
     NSMutableArray *rules = [NSMutableArray array];
     for (NSDictionary *def in [self defaultRules]) {
-        NSString *prefix = userPrefixes[def[kDeviceServerRuleNameKey]];
-        if ([prefix isKindOfClass:[NSString class]] && prefix.length > 0) {
-            NSMutableDictionary *rule = [def mutableCopy];
-            rule[kDeviceServerRulePrefixKey] = prefix;
-            [rules addObject:[rule copy]];
-        } else {
+        NSDictionary *override = overrides[def[kDeviceServerRuleNameKey]];
+        if (![override isKindOfClass:[NSDictionary class]]) {
             [rules addObject:def];
+            continue;
         }
+        NSMutableDictionary *rule = [def mutableCopy];
+        NSString *prefix = override[kDeviceServerRulePrefixKey];
+        if ([prefix isKindOfClass:[NSString class]] && prefix.length > 0) rule[kDeviceServerRulePrefixKey] = prefix;
+        NSString *server = override[kDeviceServerRuleServerKey];
+        if ([server isKindOfClass:[NSString class]] && server.length > 0) rule[kDeviceServerRuleServerKey] = server;
+        NSString *port = [self stringValue:override[kDeviceServerRulePortKey]];
+        if ([self isValidPort:port]) rule[kDeviceServerRulePortKey] = port;
+        NSNumber *tls = override[kDeviceServerRuleTlsKey];
+        if ([tls isKindOfClass:[NSNumber class]]) rule[kDeviceServerRuleTlsKey] = tls;
+        NSString *protocol = override[kDeviceServerRuleProtocolKey];
+        if ([protocol isKindOfClass:[NSString class]] && [self isValidProtocol:protocol]) {
+            rule[kDeviceServerRuleProtocolKey] = [protocol lowercaseString];
+        }
+        [rules addObject:[rule copy]];
     }
     return rules;
 }
@@ -84,6 +100,18 @@ static const NSUInteger kRemoteRuleURLCount = sizeof(kRemoteRuleURLs) / sizeof(k
     return nil;
 }
 
+/// protocol 支持 "tcp"/"udp"（大小写不敏感）；缺省或非法按 tcp
++ (NSString *)protocolValue:(id)value {
+    NSString *text = [[self stringValue:value] lowercaseString];
+    return [text isEqualToString:kDeviceServerProtocolUdp] ? kDeviceServerProtocolUdp : kDeviceServerProtocolTcp;
+}
+
+/// 是否为合法的 protocol 字符串（tcp/udp，大小写不敏感）
++ (BOOL)isValidProtocol:(NSString *)protocol {
+    NSString *text = [protocol lowercaseString];
+    return [text isEqualToString:kDeviceServerProtocolTcp] || [text isEqualToString:kDeviceServerProtocolUdp];
+}
+
 /// 校验单条规则：name/prefix/server/port 必填，非法返回 nil；未知字段忽略，便于以后扩展
 + (nullable NSDictionary *)parseRule:(NSDictionary *)item {
     NSString *name = [self stringValue:item[kDeviceServerRuleNameKey]];
@@ -91,12 +119,14 @@ static const NSUInteger kRemoteRuleURLCount = sizeof(kRemoteRuleURLs) / sizeof(k
     NSString *server = [[self stringValue:item[kDeviceServerRuleServerKey]] lowercaseString];
     NSString *port = [self stringValue:item[kDeviceServerRulePortKey]];
     NSNumber *tls = [self tlsValue:item[kDeviceServerRuleTlsKey]];
+    NSString *protocol = [self protocolValue:item[kDeviceServerRuleProtocolKey]];
     if (name.length == 0 || prefix.length == 0 || server.length == 0 || !tls || ![self isValidPort:port]) return nil;
     return @{kDeviceServerRuleNameKey: name,
              kDeviceServerRulePrefixKey: prefix,
              kDeviceServerRuleServerKey: server,
              kDeviceServerRulePortKey: port,
-             kDeviceServerRuleTlsKey: tls};
+             kDeviceServerRuleTlsKey: tls,
+             kDeviceServerRuleProtocolKey: protocol};
 }
 
 /// 解析整份模板；任一条非法或 name 重复则整体视为无效，保留上次缓存
@@ -121,28 +151,84 @@ static const NSUInteger kRemoteRuleURLCount = sizeof(kRemoteRuleURLs) / sizeof(k
 
 #pragma mark - 本地修改
 
-+ (void)saveUserPrefix:(nullable NSString *)prefix forRuleName:(NSString *)name {
+/// 本地规则覆盖；首次读取时把旧版前缀覆盖迁移进来并删除旧 key
++ (NSDictionary<NSString *, NSDictionary *> *)userRuleOverrides {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSMutableDictionary *userPrefixes = [[defaults dictionaryForKey:kUserPrefixesKey] mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *map = [[defaults dictionaryForKey:kUserRulesKey] mutableCopy] ?: [NSMutableDictionary dictionary];
+    NSDictionary *legacy = [defaults dictionaryForKey:kUserPrefixesKey];
+    if (legacy.count > 0) {
+        [legacy enumerateKeysAndObjectsUsingBlock:^(NSString *name, NSString *prefix, BOOL *stop) {
+            if (![prefix isKindOfClass:[NSString class]]) return;
+            NSMutableDictionary *entry = [map[name] mutableCopy] ?: [NSMutableDictionary dictionary];
+            if (!entry[kDeviceServerRulePrefixKey]) entry[kDeviceServerRulePrefixKey] = prefix;
+            map[name] = entry;
+        }];
+        [defaults removeObjectForKey:kUserPrefixesKey];
+        [defaults setObject:map forKey:kUserRulesKey];
+    }
+    return map;
+}
+
+/// 写回单条覆盖：内容为空则删除该 name 条目
++ (void)setUserRuleOverride:(NSDictionary *)entry forRuleName:(NSString *)name map:(NSMutableDictionary *)map {
+    if (entry.count == 0) [map removeObjectForKey:name]; else map[name] = entry;
+    [[NSUserDefaults standardUserDefaults] setObject:map forKey:kUserRulesKey];
+}
+
++ (void)saveUserPrefix:(nullable NSString *)prefix forRuleName:(NSString *)name {
+    NSMutableDictionary *map = [[self userRuleOverrides] mutableCopy];
+    NSMutableDictionary *entry = [map[name] mutableCopy] ?: [NSMutableDictionary dictionary];
     NSString *trimmed = [prefix stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
     NSString *defaultPrefix = @"";
     for (NSDictionary *rule in [self defaultRules]) {
         if ([rule[kDeviceServerRuleNameKey] isEqualToString:name]) defaultPrefix = rule[kDeviceServerRulePrefixKey];
     }
     if (trimmed.length == 0 || [trimmed caseInsensitiveCompare:defaultPrefix] == NSOrderedSame) {
-        [userPrefixes removeObjectForKey:name];
+        [entry removeObjectForKey:kDeviceServerRulePrefixKey];
     } else {
-        userPrefixes[name] = trimmed;
+        entry[kDeviceServerRulePrefixKey] = trimmed;
     }
-    [defaults setObject:userPrefixes forKey:kUserPrefixesKey];
+    [self setUserRuleOverride:entry forRuleName:name map:map];
 }
 
-+ (void)saveCustomRuleWithPrefix:(nullable NSString *)prefix server:(nullable NSString *)server port:(nullable NSString *)port tls:(BOOL)tls {
+/// 保存整条规则的本地覆盖；非法字段不存，全部与默认相同则删除该条覆盖
++ (void)saveUserRuleForName:(NSString *)name prefix:(nullable NSString *)prefix server:(nullable NSString *)server port:(nullable NSString *)port tls:(BOOL)tls protocol:(nullable NSString *)protocol {
+    NSDictionary *defaultRule = nil;
+    for (NSDictionary *rule in [self defaultRules]) {
+        if ([rule[kDeviceServerRuleNameKey] isEqualToString:name]) defaultRule = rule;
+    }
+    if (!defaultRule) return;
+    NSMutableDictionary *map = [[self userRuleOverrides] mutableCopy];
+    NSMutableDictionary *entry = [NSMutableDictionary dictionary];
+    NSString *trimmedPrefix = [prefix stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+    NSString *trimmedServer = [[server stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString] ?: @"";
+    NSString *trimmedPort = [port stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] ?: @"";
+    if (trimmedPrefix.length > 0 && [trimmedPrefix caseInsensitiveCompare:defaultRule[kDeviceServerRulePrefixKey]] != NSOrderedSame) {
+        entry[kDeviceServerRulePrefixKey] = trimmedPrefix;
+    }
+    if (trimmedServer.length > 0 && ![trimmedServer isEqualToString:defaultRule[kDeviceServerRuleServerKey]]) {
+        entry[kDeviceServerRuleServerKey] = trimmedServer;
+    }
+    if ([self isValidPort:trimmedPort] && ![trimmedPort isEqualToString:defaultRule[kDeviceServerRulePortKey]]) {
+        entry[kDeviceServerRulePortKey] = trimmedPort;
+    }
+    if (tls != [defaultRule[kDeviceServerRuleTlsKey] boolValue]) {
+        entry[kDeviceServerRuleTlsKey] = @(tls);
+    }
+    NSString *trimmedProtocol = [protocol lowercaseString] ?: @"";
+    if ([self isValidProtocol:trimmedProtocol] && ![trimmedProtocol isEqualToString:defaultRule[kDeviceServerRuleProtocolKey] ?: kDeviceServerProtocolTcp]) {
+        entry[kDeviceServerRuleProtocolKey] = trimmedProtocol;
+    }
+    [self setUserRuleOverride:entry forRuleName:name map:map];
+}
+
++ (void)saveCustomRuleWithPrefix:(nullable NSString *)prefix server:(nullable NSString *)server port:(nullable NSString *)port tls:(BOOL)tls protocol:(nullable NSString *)protocol {
     NSDictionary *rule = [self parseRule:@{kDeviceServerRuleNameKey: kCustomRuleName,
                                            kDeviceServerRulePrefixKey: prefix ?: @"",
                                            kDeviceServerRuleServerKey: server ?: @"",
                                            kDeviceServerRulePortKey: port ?: @"",
-                                           kDeviceServerRuleTlsKey: @(tls)}];
+                                           kDeviceServerRuleTlsKey: @(tls),
+                                           kDeviceServerRuleProtocolKey: protocol ?: kDeviceServerProtocolTcp}];
     if (rule) {
         [[NSUserDefaults standardUserDefaults] setObject:rule forKey:kUserCustomRuleKey];
     } else {
@@ -152,6 +238,7 @@ static const NSUInteger kRemoteRuleURLCount = sizeof(kRemoteRuleURLs) / sizeof(k
 
 + (void)clearUserOverrides {
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:kUserPrefixesKey];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:kUserRulesKey];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:kUserCustomRuleKey];
 }
 
@@ -207,7 +294,9 @@ static const NSUInteger kRemoteRuleURLCount = sizeof(kRemoteRuleURLs) / sizeof(k
 }
 
 + (NSString *)displayServerForRule:(NSDictionary *)rule {
-    return [NSString stringWithFormat:@"%@:%@  TLS=%@", rule[kDeviceServerRuleServerKey], rule[kDeviceServerRulePortKey],
+    BOOL udp = [[rule[kDeviceServerRuleProtocolKey] lowercaseString] isEqualToString:kDeviceServerProtocolUdp];
+    return [NSString stringWithFormat:@"%@:%@%@  TLS=%@", rule[kDeviceServerRuleServerKey],
+            udp ? @"udp" : @"", rule[kDeviceServerRulePortKey],
             [rule[kDeviceServerRuleTlsKey] boolValue] ? @"Y" : @"N"];
 }
 

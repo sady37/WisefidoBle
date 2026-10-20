@@ -1267,7 +1267,9 @@
     NSDictionary<NSString *, id> *rule = [DeviceServerRules ruleForDevice:device qrCode:self.selectedQrCode];
     if (!rule) return;
     self.serverAddressTextField.text = rule[kDeviceServerRuleServerKey];
-    self.serverPortTextField.text = rule[kDeviceServerRulePortKey];
+    // udp 规则端口框带 udp 前缀（parseProtocolAndPort: 支持 tcp/udp 前缀），tcp 填纯数字
+    BOOL udp = [[rule[kDeviceServerRuleProtocolKey] lowercaseString] isEqualToString:kDeviceServerProtocolUdp];
+    self.serverPortTextField.text = [NSString stringWithFormat:@"%@%@", udp ? @"udp" : @"", rule[kDeviceServerRulePortKey]];
     [self showMessage:[NSString stringWithFormat:@"Server set by prefix %@: %@", rule[kDeviceServerRulePrefixKey],
                        [DeviceServerRules displayServerForRule:rule]]];
 }

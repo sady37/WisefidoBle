@@ -19,12 +19,11 @@ static const CGFloat kLabelWidth = 110;
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UITextField *radarNameTextField;           // Device Prefix（扫描过滤）
 @property (nonatomic, strong) NSArray<UIButton *> *filterTypeButtons;    // Device Prefix | MAC Addr | UUID
-@property (nonatomic, strong) UIStackView *rulesStack;  // 在线模板规则，条数不限，动态生成
+@property (nonatomic, strong) UIStackView *rulesStack;  // 规则（含 Custom），条数不限，动态生成
 @property (nonatomic, strong) NSMutableDictionary<NSString *, UITextField *> *prefixFields;  // 规则 name -> 前缀输入框
-@property (nonatomic, strong) UITextField *customPrefixTextField;
-@property (nonatomic, strong) UITextField *customServerTextField;
-@property (nonatomic, strong) UITextField *customPortTextField;
-@property (nonatomic, strong) UISwitch *customTlsSwitch;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, UITextField *> *serverFields;  // 规则 name -> host:port 输入框
+@property (nonatomic, strong) NSMutableDictionary<NSString *, UISwitch *> *tlsSwitches;      // 规则 name -> TLS 滑钮
+@property (nonatomic, strong) UIButton *configSyncButton;
 @property (nonatomic, strong) UIButton *cancelButton;
 @property (nonatomic, strong) UIButton *confirmButton;
 @property (nonatomic, strong) ConfigStorage *configStorage;
@@ -107,6 +106,15 @@ static const CGFloat kLabelWidth = 110;
     return textField;
 }
 
+/// 输入框标错：红色边框 + 红色占位提示
+- (void)markServerFieldError:(UITextField *)field placeholder:(NSString *)message {
+    field.layer.borderColor = [UIColor systemRedColor].CGColor;
+    field.layer.borderWidth = 1;
+    field.layer.cornerRadius = 5;
+    field.attributedPlaceholder = [[NSAttributedString alloc] initWithString:message attributes:@{NSForegroundColorAttributeName: [UIColor systemRedColor]}];
+    [field becomeFirstResponder];
+}
+
 /// 一行：固定宽度标签 + 右侧内容
 - (UIStackView *)rowWithTitle:(NSString *)title content:(UIView *)content {
     return [self rowWithTitle:title labelWidth:kLabelWidth content:content];
@@ -122,16 +130,6 @@ static const CGFloat kLabelWidth = 110;
     row.alignment = UIStackViewAlignmentCenter;
     row.spacing = 8;
     return row;
-}
-
-- (UILabel *)serverValueLabel {
-    UILabel *label = [[UILabel alloc] init];
-    label.font = [UIFont systemFontOfSize:14];
-    label.textColor = [UIColor secondaryLabelColor];
-    label.numberOfLines = 1;
-    label.adjustsFontSizeToFitWidth = YES;
-    label.minimumScaleFactor = 0.7;
-    return label;
 }
 
 - (void)setupViews {
@@ -182,43 +180,25 @@ static const CGFloat kLabelWidth = 110;
     [_contentStack addArrangedSubview:filterRow];
     [_contentStack setCustomSpacing:24 afterView:filterRow];
 
-    // 默认设备服务器：标题 + Reset
+    // 默认设备服务器：标题 + Config Sync
     UILabel *serverTitle = [self labelWithText:@"Default Device Server:" bold:YES];
-    UIButton *resetButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [resetButton setTitle:@"Reset" forState:UIControlStateNormal];
-    [resetButton addTarget:self action:@selector(handleResetButton) forControlEvents:UIControlEventTouchUpInside];
-    [resetButton setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-    UIStackView *serverTitleRow = [[UIStackView alloc] initWithArrangedSubviews:@[serverTitle, resetButton]];
+    _configSyncButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_configSyncButton setTitle:@"Config Sync" forState:UIControlStateNormal];
+    [_configSyncButton addTarget:self action:@selector(handleConfigSyncButton) forControlEvents:UIControlEventTouchUpInside];
+    [_configSyncButton setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+    UIStackView *serverTitleRow = [[UIStackView alloc] initWithArrangedSubviews:@[serverTitle, _configSyncButton]];
     serverTitleRow.axis = UILayoutConstraintAxisHorizontal;
     [_contentStack addArrangedSubview:serverTitleRow];
 
-    // 在线模板规则：前缀可改，服务器跟随在线模板
+    // 规则（含最后一条 Custom）：同一两行格式动态生成
     _rulesStack = [[UIStackView alloc] init];
     _rulesStack.axis = UILayoutConstraintAxisVertical;
     _rulesStack.spacing = 6;
     [_contentStack addArrangedSubview:_rulesStack];
     [_contentStack setCustomSpacing:20 afterView:_rulesStack];
     _prefixFields = [NSMutableDictionary dictionary];
-
-    // 本地自定义规则（优先级最高）：前缀、服务器、端口、TLS 都可改
-    _customPrefixTextField = [self textFieldWithPlaceholder:@""];
-    _customServerTextField = [self textFieldWithPlaceholder:@"app.wisefido.com"];
-    _customServerTextField.keyboardType = UIKeyboardTypeURL;
-    _customPortTextField = [self textFieldWithPlaceholder:@"29010"];
-    _customPortTextField.keyboardType = UIKeyboardTypeNumberPad;
-    _customTlsSwitch = [[UISwitch alloc] init];
-    UILabel *tlsLabel = [self labelWithText:@"TLS" bold:NO];
-    tlsLabel.font = [UIFont systemFontOfSize:14];
-    [tlsLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-    [_customTlsSwitch setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
-    UIStackView *portStack = [[UIStackView alloc] initWithArrangedSubviews:@[_customPortTextField, tlsLabel, _customTlsSwitch]];
-    portStack.axis = UILayoutConstraintAxisHorizontal;
-    portStack.alignment = UIStackViewAlignmentCenter;
-    portStack.spacing = 8;
-
-    [_contentStack addArrangedSubview:[self rowWithTitle:@"Custom Prefix:" content:_customPrefixTextField]];
-    [_contentStack addArrangedSubview:[self rowWithTitle:@"Custom Server:" content:_customServerTextField]];
-    [_contentStack addArrangedSubview:[self rowWithTitle:@"Port:" content:portStack]];
+    _serverFields = [NSMutableDictionary dictionary];
+    _tlsSwitches = [NSMutableDictionary dictionary];
 
     // 取消按钮
     _cancelButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -272,26 +252,43 @@ static const CGFloat kLabelWidth = 110;
     [self fillServerRules:[DeviceServerRules currentRules] custom:[DeviceServerRules customRule]];
 }
 
-/// 每条规则两行：「<name> Prefix: [输入框]」+「Server: host:port  TLS=Y/N」
+/// 每条规则（含 Custom）两行：「<name> Prefix: [输入框] [TLS 滑钮]」+「Server: [host:port 输入框]」；Custom 无配置时显示空输入框
 - (void)fillServerRules:(NSArray<NSDictionary<NSString *, id> *> *)rules custom:(nullable NSDictionary<NSString *, id> *)custom {
     for (UIView *view in _rulesStack.arrangedSubviews) {
         [view removeFromSuperview];
     }
     [_prefixFields removeAllObjects];
-    for (NSDictionary *rule in rules) {
+    [_serverFields removeAllObjects];
+    [_tlsSwitches removeAllObjects];
+
+    NSMutableArray<NSDictionary<NSString *, id> *> *allRules = [rules mutableCopy];
+    [allRules addObject:custom ?: @{kDeviceServerRuleNameKey: @"Custom"}];
+    for (NSDictionary *rule in allRules) {
         NSString *name = rule[kDeviceServerRuleNameKey];
+
         UITextField *prefixField = [self textFieldWithPlaceholder:@""];
-        prefixField.text = rule[kDeviceServerRulePrefixKey];
+        prefixField.text = rule[kDeviceServerRulePrefixKey] ?: @"";
         _prefixFields[name] = prefixField;
-        UILabel *serverLabel = [self serverValueLabel];
-        serverLabel.text = [DeviceServerRules displayServerForRule:rule];
-        [_rulesStack addArrangedSubview:[self rowWithTitle:[NSString stringWithFormat:@"%@ Prefix:", name] content:prefixField]];
-        [_rulesStack addArrangedSubview:[self rowWithTitle:@"Server:" labelWidth:56 content:serverLabel]];
+        UISwitch *tlsSwitch = [[UISwitch alloc] init];
+        tlsSwitch.on = [rule[kDeviceServerRuleTlsKey] boolValue];
+        _tlsSwitches[name] = tlsSwitch;
+        [tlsSwitch setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+        UIStackView *prefixRow = [[UIStackView alloc] initWithArrangedSubviews:@[prefixField, tlsSwitch]];
+        prefixRow.axis = UILayoutConstraintAxisHorizontal;
+        prefixRow.alignment = UIStackViewAlignmentCenter;
+        prefixRow.spacing = 8;
+
+        UITextField *serverField = [self textFieldWithPlaceholder:@"xxx.com:port"];
+        serverField.keyboardType = UIKeyboardTypeURL;
+        NSString *server = rule[kDeviceServerRuleServerKey] ?: @"";
+        NSString *port = rule[kDeviceServerRulePortKey] ?: @"";
+        BOOL udp = [[rule[kDeviceServerRuleProtocolKey] lowercaseString] isEqualToString:kDeviceServerProtocolUdp];
+        serverField.text = server.length > 0 && port.length > 0 ? [NSString stringWithFormat:@"%@:%@%@", server, udp ? @"udp" : @"", port] : @"";
+        _serverFields[name] = serverField;
+
+        [_rulesStack addArrangedSubview:[self rowWithTitle:[NSString stringWithFormat:@"%@ Prefix:", name] content:prefixRow]];
+        [_rulesStack addArrangedSubview:[self rowWithTitle:@"Server:" labelWidth:56 content:serverField]];
     }
-    _customPrefixTextField.text = custom[kDeviceServerRulePrefixKey];
-    _customServerTextField.text = custom[kDeviceServerRuleServerKey];
-    _customPortTextField.text = custom[kDeviceServerRulePortKey];
-    _customTlsSwitch.on = [custom[kDeviceServerRuleTlsKey] boolValue];
 }
 
 - (void)updateFilterTypeButtons {
@@ -319,9 +316,14 @@ static const CGFloat kLabelWidth = 110;
     [self updateFilterTypeButtons];
 }
 
-/// 恢复默认服务器规则（在线模板，无则内置）并清空自定义，确认后才清除本地修改
-- (void)handleResetButton {
-    [self fillServerRules:[DeviceServerRules defaultRules] custom:nil];
+/// 同步最新在线模板（失败则用缓存/内置），并清除本地规则修改与自定义
+- (void)handleConfigSyncButton {
+    _configSyncButton.enabled = NO;
+    [DeviceServerRules refreshFromRemoteWithCompletion:^(BOOL updated) {
+        [DeviceServerRules clearUserOverrides];
+        [self fillServerRules:[DeviceServerRules defaultRules] custom:nil];
+        self->_configSyncButton.enabled = YES;
+    }];
 }
 
 - (void)handleCancelButton {
@@ -330,22 +332,41 @@ static const CGFloat kLabelWidth = 110;
 }
 
 - (void)handleConfirmButton {
-    // 自定义服务器填了但端口不对时提示，避免静默丢弃
     NSCharacterSet *spaces = [NSCharacterSet whitespaceCharacterSet];
-    NSString *customServer = [_customServerTextField.text stringByTrimmingCharactersInSet:spaces] ?: @"";
-    NSString *customPort = [_customPortTextField.text stringByTrimmingCharactersInSet:spaces] ?: @"";
-    if (customServer.length > 0 && ![DeviceServerRules isValidPort:customPort]) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:nil
-                                                                       message:@"Custom server needs a valid port (1-65535)"
-                                                                preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
-        return;
+    NSRegularExpression *portRegex = [NSRegularExpression regularExpressionWithPattern:@"^(tcp|udp)?(\\d+)$" options:NSRegularExpressionCaseInsensitive error:nil];
+
+    // 逐行解析 host:[tcp|udp]port；协议前缀可省略（默认 tcp），tcp/udp 均支持
+    for (NSString *name in _serverFields) {
+        UITextField *input = _serverFields[name];
+        input.layer.borderColor = [UIColor clearColor].CGColor;
+        NSString *text = [input.text stringByTrimmingCharactersInSet:spaces] ?: @"";
+        NSRange colonRange = [text rangeOfString:@":" options:NSBackwardsSearch];
+        NSString *host = colonRange.location != NSNotFound && colonRange.location > 0 ? [[text substringToIndex:colonRange.location] stringByTrimmingCharactersInSet:spaces] : @"";
+        NSString *portText = colonRange.location != NSNotFound && colonRange.location > 0 ? [[text substringFromIndex:colonRange.location + 1] stringByTrimmingCharactersInSet:spaces] : @"";
+        NSTextCheckingResult *match = [portRegex firstMatchInString:portText options:0 range:NSMakeRange(0, portText.length)];
+        NSString *protocol = match && [match rangeAtIndex:1].location != NSNotFound ? [[portText substringWithRange:[match rangeAtIndex:1]] lowercaseString] : kDeviceServerProtocolTcp;
+        NSString *port = match ? [portText substringWithRange:[match rangeAtIndex:2]] : nil;
+        NSString *prefix = _prefixFields[name].text ?: @"";
+        BOOL tls = _tlsSwitches[name].isOn;
+        if ([name isEqualToString:@"Custom"]) {
+            // 填了服务器但端口不对时提示，避免静默丢弃；留空走 saveCustomRule 的清除语义
+            if (host.length > 0 && ![DeviceServerRules isValidPort:port]) {
+                [self markServerFieldError:input placeholder:@"host:port (1-65535)"];
+                return;
+            }
+            [DeviceServerRules saveCustomRuleWithPrefix:prefix server:host port:port tls:tls protocol:protocol];
+        } else {
+            if (host.length == 0 || ![DeviceServerRules isValidPort:port]) {
+                [self markServerFieldError:input placeholder:@"host:port (1-65535)"];
+                return;
+            }
+            [DeviceServerRules saveUserRuleForName:name prefix:prefix server:host port:port tls:tls protocol:protocol];
+        }
     }
 
     // 获取用户输入的雷达设备名
     NSString *radarName = _radarNameTextField.text;
-    radarName = [radarName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]]; // 去除前后空格
+    radarName = [radarName stringByTrimmingCharactersInSet:spaces]; // 去除前后空格
 
     if (radarName.length == 0) {
         radarName = @"TSBLU"; // 默认值
@@ -356,12 +377,6 @@ static const CGFloat kLabelWidth = 110;
 
     FilterType filterType = _currentFilterType;
     [_configStorage saveFilterType:filterType];
-
-    // 保存默认设备服务器规则
-    [_prefixFields enumerateKeysAndObjectsUsingBlock:^(NSString *name, UITextField *field, BOOL *stop) {
-        [DeviceServerRules saveUserPrefix:field.text forRuleName:name];
-    }];
-    [DeviceServerRules saveCustomRuleWithPrefix:_customPrefixTextField.text server:customServer port:customPort tls:_customTlsSwitch.isOn];
 
     CONFIGLOG(@"Confirm configuration: devicename=%@, filter type=%ld, server rules=%@", radarName, (long)filterType, [DeviceServerRules currentRules]);
 

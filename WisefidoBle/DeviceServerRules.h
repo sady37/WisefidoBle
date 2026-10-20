@@ -18,6 +18,11 @@ extern NSString * const kDeviceServerRulePrefixKey;  // prefix (NSString)，例�
 extern NSString * const kDeviceServerRuleServerKey;  // server (NSString)，例如 app.wisefido.com
 extern NSString * const kDeviceServerRulePortKey;    // port (NSString，纯数字)，例如 8443
 extern NSString * const kDeviceServerRuleTlsKey;     // tls (NSNumber BOOL)
+extern NSString * const kDeviceServerRuleProtocolKey; // protocol (NSString，"tcp"/"udp" 小写，缺省 tcp)
+
+// protocol 取值
+extern NSString * const kDeviceServerProtocolTcp;
+extern NSString * const kDeviceServerProtocolUdp;
 
 @interface DeviceServerRules : NSObject
 
@@ -30,10 +35,12 @@ extern NSString * const kDeviceServerRuleTlsKey;     // tls (NSNumber BOOL)
 /// 本地自定义规则（优先级最高），未设置返回 nil
 + (nullable NSDictionary<NSString *, id> *)customRule;
 
-/// 保存某条规则的本地前缀；为空或与默认值相同则清除覆盖
+/// 保存某条规则的本地前缀；为空或与默认值相同则清除前缀覆盖
 + (void)saveUserPrefix:(nullable NSString *)prefix forRuleName:(NSString *)name;
+/// 保存整条规则的本地覆盖；非法字段（server 空 / 端口不在 1-65535）不存，全部与默认相同则删除该条覆盖
++ (void)saveUserRuleForName:(NSString *)name prefix:(nullable NSString *)prefix server:(nullable NSString *)server port:(nullable NSString *)port tls:(BOOL)tls protocol:(nullable NSString *)protocol;
 /// 保存本地自定义规则；前缀/服务器为空或端口非法则清除
-+ (void)saveCustomRuleWithPrefix:(nullable NSString *)prefix server:(nullable NSString *)server port:(nullable NSString *)port tls:(BOOL)tls;
++ (void)saveCustomRuleWithPrefix:(nullable NSString *)prefix server:(nullable NSString *)server port:(nullable NSString *)port tls:(BOOL)tls protocol:(nullable NSString *)protocol;
 + (void)clearUserOverrides;
 
 /// 按 deviceName / deviceId / QR 码前缀匹配：本地自定义优先，其次模板中 TLS=Y 的，再其次第一条匹配；未匹配返回 nil
