@@ -4,8 +4,9 @@
 
 #import "QrScanViewController.h"
 #import <AVFoundation/AVFoundation.h>
+#import "WisefidoBle-Swift.h"
 
-@interface QrScanViewController () <AVCaptureMetadataOutputObjectsDelegate>
+@interface QrScanViewController () <AVCaptureMetadataOutputObjectsDelegate, AVCaptureVideoDataOutputSampleBufferDelegate>
 
 @property (nonatomic, strong) UILabel *titleLabel;
 @property (nonatomic, strong) UIView *previewContainer;
@@ -16,6 +17,9 @@
 @property (nonatomic, strong, nullable) AVCaptureVideoPreviewLayer *previewLayer;
 @property (nonatomic, strong) dispatch_queue_t sessionQueue;
 @property (nonatomic, assign) BOOL didDeliverCode;
+// 同一画面旁路识别盒底 ArUco 码（测高入口），只在 arucoQueue 上访问 arucoWorker
+@property (nonatomic, strong) dispatch_queue_t arucoQueue;
+@property (nonatomic, strong) ArucoScanWorker *arucoWorker;
 
 @end
 
@@ -25,6 +29,8 @@
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     _sessionQueue = dispatch_queue_create("com.wisefido.ble.qrscan", DISPATCH_QUEUE_SERIAL);
+    _arucoQueue = dispatch_queue_create("com.wisefido.ble.qrscan.aruco", DISPATCH_QUEUE_SERIAL);
+    _arucoWorker = [[ArucoScanWorker alloc] init];
     [self setupViews];
     [self requestCameraAndStart];
 }
@@ -46,7 +52,7 @@
     [self.view addSubview:_previewContainer];
 
     _hintLabel = [[UILabel alloc] init];
-    _hintLabel.text = @"Point the camera at the QR code on the device";
+    _hintLabel.text = @"Point the camera at the device QR code, or at the ArUco label on the box bottom to measure radar height";
     _hintLabel.font = [UIFont systemFontOfSize:14];
     _hintLabel.textColor = [UIColor secondaryLabelColor];
     _hintLabel.textAlignment = NSTextAlignmentCenter;
@@ -161,6 +167,15 @@
         output.metadataObjectTypes = @[AVMetadataObjectTypeQRCode];
     }
 
+    // ArUco 旁路：BGRA 帧，丢弃迟到帧（检测比帧率慢）
+    AVCaptureVideoDataOutput *video = [[AVCaptureVideoDataOutput alloc] init];
+    video.alwaysDiscardsLateVideoFrames = YES;
+    video.videoSettings = @{(id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA)};
+    if ([session canAddOutput:video]) {
+        [session addOutput:video];
+        [video setSampleBufferDelegate:self queue:_arucoQueue];
+    }
+
     _previewLayer = [AVCaptureVideoPreviewLayer layerWithSession:session];
     _previewLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
     _previewLayer.frame = _previewContainer.bounds;
@@ -208,6 +223,29 @@
     } else {
         [self dismissViewControllerAnimated:animated completion:completion];
     }
+}
+
+#pragma mark - AVCaptureVideoDataOutputSampleBufferDelegate（ArUco）
+
+- (void)captureOutput:(AVCaptureOutput *)output
+didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
+       fromConnection:(AVCaptureConnection *)connection {
+    CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(sampleBuffer);
+    if (!buffer || ![self.arucoWorker processFrame:buffer]) return;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self || self.didDeliverCode) return;
+        self.didDeliverCode = YES;
+        [self stopSession];
+        [[[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium] impactOccurred];
+        id<QrScanViewControllerDelegate> delegate = self.delegate;
+        [self closeAnimated:YES completion:^{
+            if ([delegate respondsToSelector:@selector(qrScanViewControllerDidDetectAruco:)]) {
+                [delegate qrScanViewControllerDidDetectAruco:self];
+            }
+        }];
+    });
 }
 
 #pragma mark - AVCaptureMetadataOutputObjectsDelegate

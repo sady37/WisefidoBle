@@ -11,6 +11,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @protocol QrScanViewControllerDelegate <NSObject>
 - (void)qrScanViewController:(QrScanViewController *)controller didScanCode:(NSString *)code;
+@optional
+/// 扫到包装盒底 ArUco 码（连续 2 帧）→ 面板已关闭，调用方进入测高
+- (void)qrScanViewControllerDidDetectAruco:(QrScanViewController *)controller;
 @end
 
 @interface QrScanViewController : UIViewController

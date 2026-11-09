@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		240000012EA0000100000001 /* BlufiClientSimStub.m in Sources */ = {isa = PBXBuildFile; fileRef = 240000002EA0000100000001 /* BlufiClientSimStub.m */; };
 		24958D912D92334100FDF2A8 /* BlufiStatusResponse.m in Sources */ = {isa = PBXBuildFile; fileRef = 24958D152D92334100FDF2A8 /* BlufiStatusResponse.m */; };
 		24958D922D92334100FDF2A8 /* BlufiClient.m in Sources */ = {isa = PBXBuildFile; fileRef = 24958D112D92334100FDF2A8 /* BlufiClient.m */; };
 		24958D932D92334100FDF2A8 /* BlufiNotifyData.m in Sources */ = {isa = PBXBuildFile; fileRef = 24958D0E2D92334100FDF2A8 /* BlufiNotifyData.m */; };
@@ -17,7 +18,6 @@
 		24958D982D92334100FDF2A8 /* BlufiFrameCtrlData.m in Sources */ = {isa = PBXBuildFile; fileRef = 24958D0C2D92334100FDF2A8 /* BlufiFrameCtrlData.m */; };
 		24958D992D92334100FDF2A8 /* BlufiSecurity.m in Sources */ = {isa = PBXBuildFile; fileRef = 24958D8F2D92334100FDF2A8 /* BlufiSecurity.m */; };
 		24958D9A2D92334100FDF2A8 /* BlufiConfigureParams.m in Sources */ = {isa = PBXBuildFile; fileRef = 24958D122D92334100FDF2A8 /* BlufiConfigureParams.m */; };
-		240000012EA0000100000001 /* BlufiClientSimStub.m in Sources */ = {isa = PBXBuildFile; fileRef = 240000002EA0000100000001 /* BlufiClientSimStub.m */; };
 		24958D9D2D92334100FDF2A8 /* LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = 24958D862D92334100FDF2A8 /* LICENSE */; };
 		24958DB42D9233F500FDF2A8 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 24958DB32D9233F500FDF2A8 /* README.md */; };
 		24958DB62D92340C00FDF2A8 /* sleepaceSDK.txt in Resources */ = {isa = PBXBuildFile; fileRef = 24958DB52D92340C00FDF2A8 /* sleepaceSDK.txt */; };
@@ -48,6 +48,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		240000002EA0000100000001 /* BlufiClientSimStub.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = BlufiClientSimStub.m; sourceTree = "<group>"; };
 		24958CE02D922EB900FDF2A8 /* WisefidoBle.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = WisefidoBle.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		24958CFF2D9231B200FDF2A8 /* BLEWifiConfig.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = BLEWifiConfig.framework; sourceTree = "<group>"; };
 		24958D002D9231B200FDF2A8 /* BluetoothManager.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = BluetoothManager.framework; sourceTree = "<group>"; };
@@ -186,7 +187,6 @@
 		24958D8D2D92334100FDF2A8 /* BlufiDH.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = BlufiDH.m; sourceTree = "<group>"; };
 		24958D8E2D92334100FDF2A8 /* BlufiSecurity.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BlufiSecurity.h; sourceTree = "<group>"; };
 		24958D8F2D92334100FDF2A8 /* BlufiSecurity.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = BlufiSecurity.m; sourceTree = "<group>"; };
-		240000002EA0000100000001 /* BlufiClientSimStub.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = BlufiClientSimStub.m; sourceTree = "<group>"; };
 		24958DB32D9233F500FDF2A8 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		24958DB52D92340C00FDF2A8 /* sleepaceSDK.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = sleepaceSDK.txt; sourceTree = "<group>"; };
 		24958DB72D92343200FDF2A8 /* EspBlufiSDK.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = EspBlufiSDK.md; sourceTree = "<group>"; };
@@ -558,6 +558,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 7R9P94S3L7;
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = (
+					BlufiClient.m,
+					BlufiDH.m,
+					BlufiSecurity.m,
+				);
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sdkSleepace",
@@ -569,9 +574,11 @@
 				);
 				INFOPLIST_FILE = WisefidoBle/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = WisefidoBle;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "WisefidoBLE requires Bluetooth access to connect and configure your radar/sleep monitoring devices.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "WisefidoBle requires Bluetooth to scan and configure Wisefido devices";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "WisefidoBLE requires Bluetooth access to connect and configure your radar/sleep monitoring devices.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "WisefidoBle uses the camera to scan the QR code on a device";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "WisefidoBLE requires local network access for device discovery.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -592,20 +599,18 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/sdkEsp/Security/openssl",
 				);
+				MARKETING_VERSION = 2.1;
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-lcrypto",
 					"-lssl",
 				);
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = (
-					BlufiClient.m,
-					BlufiDH.m,
-					BlufiSecurity.m,
-				);
-				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wisefido.WisefidoBle;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -620,6 +625,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 7R9P94S3L7;
+				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = (
+					BlufiClient.m,
+					BlufiDH.m,
+					BlufiSecurity.m,
+				);
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/sdkSleepace",
@@ -631,9 +641,11 @@
 				);
 				INFOPLIST_FILE = WisefidoBle/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = WisefidoBle;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "WisefidoBLE requires Bluetooth access to connect and configure your radar/sleep monitoring devices.";
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "WisefidoBle requires Bluetooth to scan and configure Wisefido devices";
 				INFOPLIST_KEY_NSBluetoothPeripheralUsageDescription = "WisefidoBLE requires Bluetooth access to connect and configure your radar/sleep monitoring devices.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "WisefidoBle uses the camera to scan the QR code on a device";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "WisefidoBLE requires local network access for device discovery.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
@@ -654,20 +666,18 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/sdkEsp/Security/openssl",
 				);
+				MARKETING_VERSION = 2.1;
 				"OTHER_LDFLAGS[sdk=iphoneos*]" = (
 					"$(inherited)",
 					"-lcrypto",
 					"-lssl",
 				);
-				"EXCLUDED_SOURCE_FILE_NAMES[sdk=iphonesimulator*]" = (
-					BlufiClient.m,
-					BlufiDH.m,
-					BlufiSecurity.m,
-				);
-				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.wisefido.WisefidoBle;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;

@@ -10,6 +10,7 @@
 #import "RecentRecordsViewController.h"
 #import "DeviceServerRules.h"
 #import "QrScanViewController.h"
+#import "WisefidoBle-Swift.h"
 #import <os/log.h>
 
 
@@ -38,6 +39,7 @@
 @property (nonatomic, strong) UIButton *searchButton;
 @property (nonatomic, weak, nullable) QrScanViewController *activeQrVC; // 顶部扫码面板
 @property (nonatomic, strong) UIButton *qrScanButton;      // STEP 1 行：扫码匹配
+@property (nonatomic, strong) UIButton *measureButton;     // STEP 1 行：扫描栏左侧，手机测角（Pitch/Roll/Yaw）
 @property (nonatomic, strong) UIView *serverHistoryRow;    // Recent Servers + Recent WiFi（WiFi 输入框下方）
 @property (nonatomic, strong) UIStackView *stepThreeStackView; // STEP 3 | Pair
 @property (nonatomic, strong) UILabel *stepThreeLabel;
@@ -159,7 +161,7 @@
     self.title = @"BLE WiFi Config";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
 
-    // ------------ STEP 1 行：STEP 1 | (spacer) | QR | BLE ------------
+    // ------------ STEP 1 行：STEP 1 | (spacer) | Measure | QR | BLE ------------
     _headerStackView = [[UIStackView alloc] init];
     _headerStackView.axis = UILayoutConstraintAxisHorizontal;
     _headerStackView.distribution = UIStackViewDistributionFill;
@@ -181,6 +183,13 @@
     [spacerView setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
     [spacerView setContentCompressionResistancePriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
     [_headerStackView addArrangedSubview:spacerView];
+
+    // Measure：手机测角（扫描栏左侧）
+    _measureButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_measureButton setTitle:@"Measure" forState:UIControlStateNormal];
+    _measureButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+    _measureButton.accessibilityLabel = @"Measure angle";
+    [_headerStackView addArrangedSubview:_measureButton];
 
     // QR 扫码按钮
     _qrScanButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -481,6 +490,7 @@
     [self.queryButton addTarget:self action:@selector(handleQueryButton:) forControlEvents:UIControlEventTouchUpInside];
     [self.searchButton addTarget:self action:@selector(handleSearchButton:) forControlEvents:UIControlEventTouchUpInside];
     [self.qrScanButton addTarget:self action:@selector(handleQrScanButton:) forControlEvents:UIControlEventTouchUpInside];
+    [self.measureButton addTarget:self action:@selector(handleMeasureButton:) forControlEvents:UIControlEventTouchUpInside];
     [self.recentServerButton addTarget:self action:@selector(showServerHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
     [self.recentWifiButton addTarget:self action:@selector(showWifiHistoryMenu:) forControlEvents:UIControlEventTouchUpInside];
 }
@@ -1337,6 +1347,32 @@ static const NSTimeInterval kQrMatchTotalTimeout = 10.0;   // 总超时
 - (void)qrScanViewController:(QrScanViewController *)controller didScanCode:(NSString *)code {
     self.activeQrVC = nil;
     [self startQrMatch:code];
+}
+
+/// 扫到盒底 ArUco 码 → 测雷达安装高度（owlCare 同款流程），结果显示在状态栏并弹窗
+- (void)qrScanViewControllerDidDetectAruco:(QrScanViewController *)controller {
+    self.activeQrVC = nil;
+    [self showMessage:@"ArUco marker found, measuring radar height"];
+    __weak typeof(self) weakSelf = self;
+    [MeasureLauncher presentHeightMeasureFrom:self onResult:^(double height) {
+        __strong typeof(weakSelf) self = weakSelf;
+        if (!self) return;
+        NSString *text = [NSString stringWithFormat:@"%.2f m", height];
+        [self showMessage:[NSString stringWithFormat:@"Radar height: %@", text]];
+        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Radar height measured"
+                                                                   message:text
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:a animated:YES completion:nil];
+    }];
+}
+
+- (void)handleMeasureButton:(id)sender {
+    if (self.activeQrVC.parentViewController) {
+        [self.activeQrVC closeAnimated:NO completion:nil];
+        self.activeQrVC = nil;
+    }
+    [MeasureLauncher presentAngleMeasureFrom:self];
 }
 
 /// 扫码成功后开始匹配设备：BM 开头走 Sleepace 直接匹配 QR 码（无兜底）；
